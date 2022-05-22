@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::env;
 use tracing::error;
+use tracing::field;
 use tracing::info;
 use tracing_log::LogTracer;
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -224,6 +225,7 @@ fn print_wave(wave: &Vec<HashSet<u16>>, width: usize, height: usize) {
     }
 }
 
+#[inline(never)]
 fn gen_map(
     rules: (
         &HashMap<u16, HashSet<u16>>,
@@ -289,6 +291,7 @@ enum CollapseResult {
     Complete(Vec<HashSet<u16>>),
 }
 
+#[inline(never)]
 fn remove_all_except_one_from_set(mut rng: &mut ThreadRng, set: &HashSet<u16>) -> HashSet<u16> {
     let vec = Vec::from_iter(set.iter().copied());
     let mut ret = HashSet::new();
@@ -298,6 +301,7 @@ fn remove_all_except_one_from_set(mut rng: &mut ThreadRng, set: &HashSet<u16>) -
     ret
 }
 
+#[inline(never)]
 fn collapse_one(
     mut wave: Vec<HashSet<u16>>,
     width: usize,
@@ -352,29 +356,47 @@ fn collapse_one(
 
     queue.push_back(chosen_index);
 
+    let span = tracing::trace_span!(
+        "while-loop",
+        iterations = field::Empty,
+        west_iterations = field::Empty
+    );
+    let _enter = span.enter();
+
+    let mut iterations = 0;
+    let mut west_iterations = 0;
     while queue.len() > 0 {
-        info!("{}", queue.len());
+        iterations += 1;
+        // let span = tracing::trace_span!("queue-single");
+        // let _enter = span.enter();
+
+        // info!("{}", queue.len());
         let chosen_index = queue.pop_front().unwrap();
         // info!("chosen_index: {chosen_index}");
         // info!("wave[chosen_index]: {:?}", wave[chosen_index]);
 
         // west
         if chosen_index % width > 0 {
+            west_iterations += 1;
+
+            // let span = tracing::trace_span!("west");
+            // let _enter = span.enter();
+
             let target = chosen_index - 1;
-            let west_rules = rules.3; // NESW
+            let rules = rules.3; // NESW
 
-            let allowed = wave[chosen_index]
-                .iter()
-                .filter_map(|x| west_rules.get(x))
-                .fold(HashSet::new(), |a, b| a.union(&b).cloned().collect());
-
-            let old_len = wave[target].len();
+            let mut allowed = HashSet::new();
+            for x in wave[chosen_index].iter().filter_map(|x| rules.get(x)) {
+                allowed.extend(x);
+            }
 
             let new: HashSet<u16> = wave[target].intersection(&allowed).cloned().collect(); // intersection not difference
             let new_len = new.len();
             if new_len == 0 {
                 return anyhow::Ok(CollapseResult::Contradiction);
             }
+
+            let old_len = wave[target].len();
 
             wave[target] = new;
 
@@ -386,14 +408,14 @@ fn collapse_one(
         // east
         if chosen_index % width < width - 1 {
             let target = chosen_index + 1;
-            let east_rules = rules.1; // NESW
+            let rules = rules.1; // NESW
 
-            let allowed = wave[chosen_index]
-                .iter()
-                .filter_map(|x| east_rules.get(x))
-                .fold(HashSet::new(), |a, b| a.union(&b).cloned().collect());
+            let mut allowed = HashSet::new();
+            for x in wave[chosen_index].iter().filter_map(|x| rules.get(x)) {
+                allowed.extend(x);
+            }
 
-            let new: HashSet<u16> = wave[target].intersection(&allowed).cloned().collect();
+            let new: HashSet<_> = wave[target].intersection(&allowed).cloned().collect();
             let new_len = new.len();
             if new_len == 0 {
                 return anyhow::Ok(CollapseResult::Contradiction);
@@ -411,12 +433,12 @@ fn collapse_one(
         // south
         if chosen_index / width > 0 {
             let target = chosen_index - width;
-            let west_rules = rules.2; // NESW
+            let rules = rules.2; // NESW
 
-            let allowed = wave[chosen_index]
-                .iter()
-                .filter_map(|x| west_rules.get(x))
-                .fold(HashSet::new(), |a, b| a.union(&b).cloned().collect());
+            let mut allowed = HashSet::new();
+            for x in wave[chosen_index].iter().filter_map(|x| rules.get(x)) {
+                allowed.extend(x);
+            }
 
             let new: HashSet<u16> = wave[target].intersection(&allowed).cloned().collect();
             let new_len = new.len();
@@ -436,12 +458,12 @@ fn collapse_one(
         // north
         if chosen_index / width < height - 1 {
             let target = chosen_index + width;
-            let west_rules = rules.0; // NESW
+            let rules = rules.0; // NESW
 
-            let allowed = wave[chosen_index]
-                .iter()
-                .filter_map(|x| west_rules.get(x))
-                .fold(HashSet::new(), |a, b| a.union(&b).cloned().collect());
+            let mut allowed = HashSet::new();
+            for x in wave[chosen_index].iter().filter_map(|x| rules.get(x)) {
+                allowed.extend(x);
+            }
 
             let new: HashSet<u16> = wave[target].intersection(&allowed).cloned().collect();
             let new_len = new.len();
@@ -459,5 +481,279 @@ fn collapse_one(
         }
     }
 
+    span.record("iterations", &iterations);
+    span.record("west_iterations", &west_iterations);
+
     anyhow::Ok(CollapseResult::Next(wave))
+}
+
+const DIRECTIONS: [(isize, isize); 4] = [(0, -1), (1, 0), (0, -1), (-1, 0)];
+
+const N: usize = 128;
+
+struct Rules {
+    rules: [HashMap<usize, BitSet<N>>; 4],
+}
+
+impl Rules {
+    fn new(width: isize, height: isize, tiles: Vec<usize>) -> Rules {
+        let mut rules = [
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        ];
+
+        for y in 0..height {
+            for x in 0..width {
+                for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                    let target = (x + direction.0, y + direction.1);
+                    // check if neighbor is outside the bounds.
+                    if target.0 < 0 || target.0 > width || target.1 < 0 || target.1 > height {
+                        continue;
+                    }
+
+                    let current_tile = tiles[(x + y * width) as usize];
+                    let adjacent_tile = tiles[(target.0 + target.1 * width) as usize];
+
+                    rules[ordinal]
+                        .entry(current_tile)
+                        .or_insert(BitSet::<N>::new())
+                        .set(adjacent_tile);
+                }
+            }
+        }
+
+        Rules { rules }
+    }
+}
+
+struct Wave<T: Copy + std::hash::Hash + Eq> {
+    width: isize,
+    height: isize,
+    mapping: HashMap<T, usize>,
+    array: Vec<BitSet<N>>,
+}
+
+impl<T: Copy + std::hash::Hash + Eq> Wave<T> {
+    fn new(width: usize, height: usize, all_tiles: &Vec<T>) -> Wave<T> {
+        let mut mapping = HashMap::new();
+        let mut bitset = BitSet::<N>::new();
+        for v in all_tiles {
+            if let None = mapping.get(v) {
+                bitset.set(mapping.len());
+                mapping.insert(*v, mapping.len());
+            }
+        }
+
+        Wave {
+            width: width as isize,
+            height: height as isize,
+            mapping: mapping,
+            array: vec![bitset; width * height],
+        }
+    }
+
+    fn propagate(&mut self, rules: &Rules, start: (isize, isize)) -> bool {
+        let mut stack = Vec::new();
+        stack.push(start);
+
+        while stack.len() > 0 {
+            let chosen_index = stack.pop().unwrap();
+
+            for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                let target = (chosen_index.0 + direction.0, chosen_index.1 + direction.1);
+
+                // check if neighbor is outside the bounds.
+                if target.0 < 0 || target.0 > self.width || target.1 < 0 || target.1 > self.height {
+                    continue;
+                }
+
+                let rules = &rules.rules[ordinal];
+
+                let mut allowed = BitSet::new();
+                for x in self.array[(chosen_index.0 + chosen_index.1 * self.height) as usize]
+                    .iter()
+                    .filter_map(|x| rules.get(&x))
+                {
+                    allowed.union(x);
+                }
+
+                let old_len = self.array[(target.0 + target.1 * self.width) as usize].pop_cnt();
+                self.array[(target.0 + target.1 * self.width) as usize].intersect(&allowed); // intersection not difference
+                let new_len = self.array[(target.0 + target.1 * self.width) as usize].pop_cnt();
+
+                if new_len == 0 {
+                    return false;
+                }
+
+                if new_len < old_len {
+                    stack.push(target);
+                }
+            }
+        }
+        true
+    }
+
+    fn find_and_collapse_random_lowest_entropy_indices(
+        &mut self,
+        mut rng: &mut ThreadRng,
+    ) -> Result<()> {
+        // TODO: use real entropy instead of number of possibilities. Requires tile weights.
+        let entropies = self
+            .array
+            .iter()
+            .map(|x| x.pop_cnt())
+            .enumerate()
+            .filter(|&x| x.1 > 1)
+            .collect::<Vec<(usize, usize)>>();
+
+        anyhow::ensure!(entropies.len() > 1);
+
+        let minimum_entropy = entropies
+            .iter()
+            .map(|x| x.1)
+            .min()
+            .ok_or(anyhow!("something"))?;
+        let minimum_entropies: Vec<_> = entropies
+            .into_iter()
+            .filter(|v| v.1 <= minimum_entropy)
+            .map(|x| x.0)
+            .collect();
+
+        anyhow::ensure!(minimum_entropies.len() > 0);
+
+        let chosen_index =
+            minimum_entropies[Uniform::from(0..minimum_entropies.len()).sample(&mut rng)];
+
+        let chosen_bit = Uniform::from(0..self.array[chosen_index].pop_cnt()).sample(&mut rng);
+
+        // collapse random tile to something that is possible
+        self.array[chosen_index].clear_all_except_nth_set_bit(chosen_bit);
+
+        anyhow::Ok(())
+    }
+}
+
+#[derive(Eq, PartialEq, Clone, Debug)]
+struct BitSet<const N: usize> {
+    bits: [usize; N],
+}
+
+impl<const N: usize> BitSet<N> {
+    fn new() -> BitSet<N> {
+        BitSet { bits: [0; N] }
+    }
+
+    fn set(&mut self, offset: usize) {
+        self.bits[offset / std::mem::size_of::<usize>()] |=
+            1 << offset % std::mem::size_of::<usize>();
+    }
+
+    fn reset(&mut self, offset: usize) {
+        self.bits[offset / std::mem::size_of::<usize>()] &=
+            !(1 << offset % std::mem::size_of::<usize>());
+    }
+
+    fn pop_cnt(&self) -> usize {
+        let mut count = 0;
+        for i in 0..self.bits.len() {
+            count += self.bits[i].count_ones();
+        }
+
+        count as usize
+    }
+
+    fn intersect(&mut self, other: &BitSet<N>) {
+        for i in 0..self.bits.len() {
+            self.bits[i] &= other.bits[i];
+        }
+    }
+
+    fn union(&mut self, other: &BitSet<N>) {
+        for i in 0..self.bits.len() {
+            self.bits[i] |= other.bits[i];
+        }
+    }
+
+    fn clear_all_except_nth_set_bit(&mut self, mut nth_bit: usize) {
+        let mut index = 0;
+        loop {
+            if self.bits[index].count_ones() as usize > nth_bit {
+                nth_bit -= self.bits[index].count_ones() as usize;
+                break;
+            }
+            index += 1;
+        }
+
+        for i in 0..std::mem::size_of::<usize>() * 8 {
+            if self.bits[index] & (1 << i) == (1 << i) {
+                nth_bit -= 1;
+            }
+
+            if nth_bit == 0 {
+                index = index * std::mem::size_of::<usize>() * 8 + i;
+                break;
+            }
+        }
+
+        let new = [0; N];
+        self.bits = new;
+
+        self.set(index);
+    }
+
+    fn iter(&self) -> BitSetIterator<N> {
+        self.into_iter()
+    }
+}
+
+impl<'a, const N: usize> IntoIterator for &'a BitSet<N> {
+    type Item = usize;
+    type IntoIter = BitSetIterator<'a, N>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BitSetIterator {
+            bitset: self,
+            index: 0,
+        }
+    }
+}
+
+pub struct BitSetIterator<'a, const N: usize> {
+    bitset: &'a BitSet<N>,
+    index: usize,
+}
+
+impl<'a, const N: usize> Iterator for BitSetIterator<'a, N> {
+    type Item = usize;
+    fn next(&mut self) -> Option<Self::Item> {
+        for word_index in self.index / 8..self.bitset.bits.len() {
+            for i in
+                self.index % (std::mem::size_of::<usize>() * 8)..std::mem::size_of::<usize>() * 8
+            {
+                if self.bitset.bits[word_index] & (1 << i) == (1 << i) {
+                    return Some(word_index * 8 + i);
+                }
+            }
+        }
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::BitSet;
+
+    #[test]
+    fn test_bitset() {
+        let mut x = BitSet::<1>::new();
+        let mut y = BitSet::<1>::new();
+
+        x.set(0);
+        y.set(0);
+
+        assert_eq!(x, y);
+    }
 }
