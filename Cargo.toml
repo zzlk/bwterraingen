@@ -10,12 +10,17 @@ bwmap = { git = "ssh://git@github.com/zzlk/bwmap.git" }
 
 multimap = "*"
 rand = "*"
+cached = "*"
 
 anyhow = "*"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["registry", "env-filter"] }
 tracing-log = "*"
 console-subscriber = "*"
+
+[dev-dependencies]
+quickcheck = "*"
+quickcheck_macros = "*"
 
 [profile.release]
 opt-level = 3
