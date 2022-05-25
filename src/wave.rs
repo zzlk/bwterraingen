@@ -7,13 +7,15 @@ use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::collections::HashMap;
-use tracing::info;
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Wave {
     pub(crate) width: isize,
     pub(crate) height: isize,
     pub(crate) array: Vec<BitSet<N>>,
+    pub(crate) rules: Rc<[HashMap<usize, BitSet<N>>; 4]>,
+    pub(crate) inverse_mapping: Rc<HashMap<usize, u16>>,
 }
 
 #[cached(key = "(BitSet<N>, usize)", convert = r#"{ (bitset, _ordinal) }"#)]
@@ -30,21 +32,67 @@ fn get_allowed_rules(
 }
 
 impl Wave {
-    pub(crate) fn new(width: usize, height: usize, all_tiles: &BitSet<N>) -> Wave {
-        Wave {
+    pub(crate) fn new(width: usize, height: usize, rules: &Rules) -> Wave {
+        // remap rules so they are not sparse
+        let mut all_tiles = BitSet::<N>::new();
+        let mut mapping = HashMap::new();
+        let mut inverse_mapping = HashMap::new();
+
+        let mut new_rules = [
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        ];
+
+        // build up mapping tables, this should contain all keys.
+        for (ordinal, _) in DIRECTIONS.iter().enumerate() {
+            for &key in rules.rules[ordinal].keys() {
+                if !mapping.contains_key(&key) {
+                    inverse_mapping.insert(mapping.len(), key);
+                    mapping.insert(key, mapping.len());
+                }
+            }
+        }
+
+        // convert it to dense format
+        for (ordinal, _) in DIRECTIONS.iter().enumerate() {
+            let old_rule = &rules.rules[ordinal];
+            let new_rule = &mut new_rules[ordinal];
+
+            let mut rule = HashMap::new(); // HashMap<usize, BitSet<N>>
+            for (tile, allowed_tiles) in old_rule {
+                let mut allowed_tiles_remapped = BitSet::<N>::new();
+                for allowed_tile in allowed_tiles {
+                    all_tiles.set(mapping[allowed_tile]);
+                    allowed_tiles_remapped.set(mapping[allowed_tile]);
+                }
+                rule.insert(mapping[tile], allowed_tiles_remapped);
+            }
+
+            *new_rule = rule;
+        }
+
+        let mut wave = Wave {
             width: width as isize,
             height: height as isize,
-            array: vec![all_tiles.clone(); width * height],
-        }
+            array: vec![all_tiles; width * height],
+            rules: Rc::new(new_rules),
+            inverse_mapping: Rc::new(inverse_mapping),
+        };
+
+        wave.constrain();
+
+        wave
     }
 
-    pub(crate) fn render(&self) -> Vec<usize> {
+    pub(crate) fn render(&self) -> Vec<u16> {
         let mut ret = Vec::new();
         for v in &self.array {
             if v.pop_cnt() > 1 || v.pop_cnt() == 0 {
-                ret.push(0);
+                ret.push(self.inverse_mapping[&0]);
             } else {
-                ret.push(v.iter().next().unwrap());
+                ret.push(self.inverse_mapping[&v.iter().next().unwrap()]);
             }
         }
         ret
@@ -60,10 +108,10 @@ impl Wave {
         true
     }
 
-    pub(crate) fn constrain(&mut self, rules: &Rules) -> bool {
+    pub(crate) fn constrain(&mut self) -> bool {
         for y in 0..self.height {
             for x in 0..self.width {
-                if !self.propagate(rules, (x + y * self.width) as usize) {
+                if !self.propagate((x + y * self.width) as usize) {
                     return false;
                 }
             }
@@ -72,7 +120,7 @@ impl Wave {
         true
     }
 
-    pub(crate) fn propagate(&mut self, rules: &Rules, start: usize) -> bool {
+    pub(crate) fn propagate(&mut self, start: usize) -> bool {
         let mut stack = Vec::new();
         stack.push(start);
 
@@ -93,7 +141,7 @@ impl Wave {
 
                 let target = (target_x + target_y * self.width) as usize;
 
-                let rules = &rules.rules[ordinal];
+                let rules = &self.rules[ordinal];
 
                 // let mut allowed = BitSet::new();
                 // for x in self.array[chosen_index]
@@ -127,7 +175,7 @@ impl Wave {
         mut rng: &mut ThreadRng,
     ) -> Result<Vec<(usize, usize)>> {
         // TODO: use real entropy instead of number of possibilities. Requires tile weights.
-        let mut entropies = self
+        let entropies = self
             .array
             .iter()
             .map(|x| x.pop_cnt())
@@ -160,53 +208,4 @@ impl Wave {
         let chosen_bit = Uniform::from(0..self.array[index].pop_cnt()).sample(&mut rng);
         self.array[index].clear_all_except_nth_set_bit(chosen_bit);
     }
-
-    pub(crate) fn collapse_random(&mut self, mut rng: &mut ThreadRng) -> usize {
-        let index = Uniform::from(0..self.array.len()).sample(&mut rng);
-        self.collapse_index(rng, index);
-        index
-    }
-
-    // pub(crate) fn find_and_collapse_random_lowest_entropy_indices(
-    //     &mut self,
-    //     mut rng: &mut ThreadRng,
-    // ) -> Result<()> {
-    //     // TODO: use real entropy instead of number of possibilities. Requires tile weights.
-    //     let entropies = self
-    //         .array
-    //         .iter()
-    //         .map(|x| x.pop_cnt())
-    //         .enumerate()
-    //         .filter(|&x| x.1 > 1)
-    //         .collect::<Vec<(usize, usize)>>();
-
-    //     anyhow::ensure!(entropies.len() >= 1);
-    //     // info!("entropies: {entropies:?}");
-
-    //     let minimum_entropy = entropies
-    //         .iter()
-    //         .map(|x| x.1)
-    //         .min()
-    //         .ok_or(anyhow!("something"))?;
-    //     let minimum_entropies: Vec<_> = entropies
-    //         .into_iter()
-    //         .filter(|v| v.1 <= minimum_entropy)
-    //         .map(|x| x.0)
-    //         .collect();
-
-    //     anyhow::ensure!(minimum_entropies.len() > 0);
-    //     // info!("minimum_entropy_indices: {minimum_entropies:?}");
-
-    //     let chosen_index =
-    //         minimum_entropies[Uniform::from(0..minimum_entropies.len()).sample(&mut rng)];
-    //     // info!("chosen_index: {chosen_index:?}");
-
-    //     let chosen_bit = Uniform::from(0..self.array[chosen_index].pop_cnt()).sample(&mut rng);
-    //     // info!("chosen_bit: {chosen_bit:?}");
-
-    //     // collapse random tile to something that is possible
-    //     self.array[chosen_index].clear_all_except_nth_set_bit(chosen_bit);
-
-    //     anyhow::Ok(())
-    // }
 }

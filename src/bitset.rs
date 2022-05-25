@@ -1,5 +1,3 @@
-use tracing::info;
-
 #[derive(Eq, PartialEq, Clone, Debug, Hash, Copy)]
 pub(crate) struct BitSet<const N: usize> {
     bits: [usize; N],
@@ -153,19 +151,19 @@ mod test {
     }
 
     #[quickcheck]
-    fn iter(A: usize) -> TestResult {
+    fn iter(a: usize) -> TestResult {
         let mut x = BitSet::<1024>::new();
 
-        x.set(A % (1024 * 64));
+        x.set(a % (1024 * 64));
 
         let mut y = BitSet::<1024>::new();
         y.union(&x);
         let mut iter = x.into_iter();
-        assert_eq!(iter.next(), Some(A % (1024 * 64)));
+        assert_eq!(iter.next(), Some(a % (1024 * 64)));
         assert_eq!(iter.next(), None);
 
         let mut iter = y.into_iter();
-        assert_eq!(iter.next(), Some(A % (1024 * 64)));
+        assert_eq!(iter.next(), Some(a % (1024 * 64)));
         assert_eq!(iter.next(), None);
 
         TestResult::passed()
@@ -181,7 +179,6 @@ mod test {
 
         let n = a % (1024 * 64);
 
-        let y = x.clone();
         x.clear_all_except_nth_set_bit(n);
 
         let mut iter = x.into_iter();
@@ -255,9 +252,4 @@ mod test {
         assert_eq!(iter.next(), Some(186));
         assert_eq!(iter.next(), None);
     }
-
-    //     2022-05-23T09:50:29.234588Z  INFO bwterraingen::bitset: src/bitset.rs:75: index: 0, val: 30
-    // 2022-05-23T09:50:29.234591Z  INFO bwterraingen::bitset: src/bitset.rs:75: index: 1, val: 36
-    // 2022-05-23T09:50:29.234593Z  INFO bwterraingen::bitset: src/bitset.rs:75: index: 2, val: 186
-    // thread 'main' panicked at 'nth_bit: 4, self: BitSet { bits: [69793218560, 20971776, 288230376151711744, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }', src/bitset.rs:84:13
 }

@@ -1,18 +1,17 @@
-use crate::{bitset::BitSet, DIRECTIONS, N};
+use crate::DIRECTIONS;
 use std::collections::{HashMap, HashSet};
-use tracing::info;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Rules {
-    pub(crate) rules: [HashMap<usize, BitSet<N>>; 4],
+    pub(crate) rules: [HashMap<u16, HashSet<u16>>; 4],
 }
 
 impl Rules {
     pub(crate) fn new(
         width: isize,
         height: isize,
-        tiles: &Vec<usize>,
-        banned_tiles: &HashSet<usize>,
+        tiles: &Vec<u16>,
+        banned_tiles: &HashSet<u16>,
     ) -> Rules {
         let mut rules = [
             HashMap::new(),
@@ -24,6 +23,7 @@ impl Rules {
         for y in 0..height {
             for x in 0..width {
                 for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                    // TODO: extend the DIRECTIONS concept to allow abritary direction offsets from current tile.
                     let target = (x + direction.0, y + direction.1);
                     // check if neighbor is outside the bounds.
                     if target.0 < 0 || target.0 >= width || target.1 < 0 || target.1 >= height {
@@ -40,8 +40,8 @@ impl Rules {
 
                     rules[ordinal]
                         .entry(current_tile)
-                        .or_insert(BitSet::<N>::new())
-                        .set(adjacent_tile);
+                        .or_insert(HashSet::new())
+                        .insert(adjacent_tile);
                 }
             }
         }
