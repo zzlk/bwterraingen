@@ -6,17 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bwmap = { git = "ssh://git@github.com/zzlk/bwmap.git" }
+bwmap = { git = "ssh://git@github.com/zzlk/bwmap.git", default-features = false }
 
-multimap = "*"
-rand = "*"
+rand = { version = "*" }
+getrandom = { version = "0.2", features = ["js"] }
 cached = "*"
 
 anyhow = "*"
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["registry", "env-filter"] }
 tracing-log = "*"
-console-subscriber = "*"
 
 [dev-dependencies]
 quickcheck = "*"

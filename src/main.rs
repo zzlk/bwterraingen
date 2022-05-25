@@ -5,7 +5,7 @@ use tracing_log::LogTracer;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
-use bwmap::get_chk_from_mpq_filename;
+// use bwmap::get_chk_from_mpq_filename;
 use bwterraingen::{get_rules_from_chk, Wave};
 
 // fn print_map(map: &Vec<usize>, width: isize, height: isize) {
@@ -35,7 +35,8 @@ fn main() -> Result<()> {
         .into_iter()
         .filter_map(|arg| {
             info!("filename: {arg}");
-            let chk = get_chk_from_mpq_filename(arg.clone()).unwrap();
+            //let chk = get_chk_from_mpq_filename(arg.clone()).unwrap();
+            let chk = std::fs::read(arg).unwrap();
             Some(get_rules_from_chk(&chk).unwrap())
         })
         .reduce(|x, y| x.combine(&y).unwrap())
