@@ -22,7 +22,11 @@ profile: debug
 test:
 	cargo test --target=x86_64-unknown-linux-gnu
 
-.PHONY: all image clean debug release push target/x86_64-unknown-linux-gnu/debug/bwterraingen target/x86_64-unknown-linux-gnu/release/bwterraingen
+wasm:
+	cargo build --release --target=wasm32-unknown-unknown
+	wasm-bindgen target/wasm32-unknown-unknown/release/bwterraingen.wasm --out-dir temp
+
+.PHONY: all image clean debug release push wasm target/x86_64-unknown-linux-gnu/debug/bwterraingen target/x86_64-unknown-linux-gnu/release/bwterraingen
 
 target/x86_64-unknown-linux-gnu/debug/bwterraingen:
 	cargo build --target=x86_64-unknown-linux-gnu
