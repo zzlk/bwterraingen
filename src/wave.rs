@@ -1,4 +1,4 @@
-use crate::{rules::Rules, BitSet};
+use crate::{bitset::BitSet, rules::Rules};
 use crate::{DIRECTIONS, N};
 use anyhow::anyhow;
 use anyhow::Result;
@@ -8,14 +8,16 @@ use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Instant;
+use tracing::info;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Wave {
-    pub(crate) width: isize,
-    pub(crate) height: isize,
-    pub(crate) array: Vec<BitSet<N>>,
-    pub(crate) rules: Rc<[HashMap<usize, BitSet<N>>; 4]>,
-    pub(crate) inverse_mapping: Rc<HashMap<usize, u16>>,
+pub struct Wave {
+    pub width: isize,
+    pub height: isize,
+    array: Vec<BitSet<N>>,
+    rules: Rc<[HashMap<usize, BitSet<N>>; 4]>,
+    inverse_mapping: Rc<HashMap<usize, u16>>,
 }
 
 #[cached(key = "(BitSet<N>, usize)", convert = r#"{ (bitset, _ordinal) }"#)]
@@ -32,7 +34,7 @@ fn get_allowed_rules(
 }
 
 impl Wave {
-    pub(crate) fn new(width: usize, height: usize, rules: &Rules) -> Wave {
+    pub fn new(width: usize, height: usize, rules: &Rules) -> Wave {
         // remap rules so they are not sparse
         let mut all_tiles = BitSet::<N>::new();
         let mut mapping = HashMap::new();
@@ -45,9 +47,12 @@ impl Wave {
             HashMap::new(),
         ];
 
+        inverse_mapping.insert(mapping.len(), 0);
+        mapping.insert(0, mapping.len());
+
         // build up mapping tables, this should contain all keys.
         for (ordinal, _) in DIRECTIONS.iter().enumerate() {
-            for &key in rules.rules[ordinal].keys() {
+            for &key in rules.ruleset[ordinal].keys() {
                 if !mapping.contains_key(&key) {
                     inverse_mapping.insert(mapping.len(), key);
                     mapping.insert(key, mapping.len());
@@ -57,7 +62,7 @@ impl Wave {
 
         // convert it to dense format
         for (ordinal, _) in DIRECTIONS.iter().enumerate() {
-            let old_rule = &rules.rules[ordinal];
+            let old_rule = &rules.ruleset[ordinal];
             let new_rule = &mut new_rules[ordinal];
 
             let mut rule = HashMap::new(); // HashMap<usize, BitSet<N>>
@@ -86,7 +91,22 @@ impl Wave {
         wave
     }
 
-    pub(crate) fn render(&self) -> Vec<u16> {
+    pub fn print_wave(&self) {
+        info!("wave:");
+        for y in 0..self.height {
+            let mut output = String::new();
+            for x in 0..self.width {
+                output = format!(
+                    "{}{:4x}",
+                    output,
+                    self.array[(x + y * self.width) as usize].pop_cnt()
+                );
+            }
+            info!("        {}", output);
+        }
+    }
+
+    pub fn render(&self) -> Vec<u16> {
         let mut ret = Vec::new();
         for v in &self.array {
             if v.pop_cnt() > 1 || v.pop_cnt() == 0 {
@@ -98,7 +118,7 @@ impl Wave {
         ret
     }
 
-    pub(crate) fn is_done(&self) -> bool {
+    pub fn is_done(&self) -> bool {
         for v in &self.array {
             if v.pop_cnt() != 1 {
                 return false;
@@ -108,7 +128,7 @@ impl Wave {
         true
     }
 
-    pub(crate) fn constrain(&mut self) -> bool {
+    pub fn constrain(&mut self) -> bool {
         for y in 0..self.height {
             for x in 0..self.width {
                 if !self.propagate((x + y * self.width) as usize) {
@@ -120,7 +140,7 @@ impl Wave {
         true
     }
 
-    pub(crate) fn propagate(&mut self, start: usize) -> bool {
+    pub fn propagate(&mut self, start: usize) -> bool {
         let mut stack = Vec::new();
         stack.push(start);
 
@@ -143,13 +163,6 @@ impl Wave {
 
                 let rules = &self.rules[ordinal];
 
-                // let mut allowed = BitSet::new();
-                // for x in self.array[chosen_index]
-                //     .iter()
-                //     .filter_map(|x| rules.get(&x))
-                // {
-                //     allowed.union(x);
-                // }
                 let allowed = get_allowed_rules(self.array[chosen_index], ordinal, &rules);
 
                 let old_len = self.array[target].pop_cnt();
@@ -170,7 +183,7 @@ impl Wave {
         true
     }
 
-    pub(crate) fn get_entropy_indices_in_order(
+    pub fn get_entropy_indices_in_order(
         &mut self,
         mut rng: &mut ThreadRng,
     ) -> Result<Vec<(usize, usize)>> {
@@ -199,13 +212,75 @@ impl Wave {
 
         entropies.sort_unstable_by_key(|x| x.1);
 
-        // info!("entropies: {entropies:?}");
-
         anyhow::Ok(entropies)
     }
 
-    pub(crate) fn collapse_index(&mut self, mut rng: &mut ThreadRng, index: usize) {
+    pub fn collapse_index(&mut self, mut rng: &mut ThreadRng, index: usize) {
         let chosen_bit = Uniform::from(0..self.array[index].pop_cnt()).sample(&mut rng);
         self.array[index].clear_all_except_nth_set_bit(chosen_bit);
     }
+
+    pub fn logical_conclusion(&self) -> Result<Wave> {
+        let mut rng = rand::thread_rng();
+
+        anyhow::Ok(loop {
+            let mut fail_count = 0;
+
+            info!("RESTART");
+
+            if let Ok(wave) = process_wave(
+                self.clone(),
+                &mut rng,
+                0,
+                &mut fail_count,
+                &mut Instant::now(),
+            ) {
+                break wave;
+            } else {
+                continue;
+            };
+        })
+    }
+}
+
+pub fn process_wave(
+    mut wave: Wave,
+    mut rng: &mut ThreadRng,
+    depth: usize,
+    fail_count: &mut usize,
+    last_time: &mut Instant,
+) -> Result<Wave> {
+    if Instant::now().duration_since(*last_time).as_millis() > 100 {
+        *last_time = Instant::now();
+        info!("depth: {depth:5}, fail_count: {fail_count:6}",);
+        wave.print_wave();
+    }
+
+    if wave.is_done() {
+        return anyhow::Ok(wave);
+    }
+
+    let indices = wave.get_entropy_indices_in_order(&mut rng)?;
+
+    for (index, _pop_cnt) in &indices {
+        if *fail_count > 5000 {
+            return anyhow::Ok(wave);
+        }
+
+        let mut wave = wave.clone();
+
+        wave.collapse_index(&mut rng, *index);
+
+        if !wave.propagate(*index) {
+            continue;
+        }
+
+        if let Ok(ret) = process_wave(wave.clone(), rng, depth + 1, fail_count, last_time) {
+            return anyhow::Ok(ret);
+        } else {
+            *fail_count += 1;
+        }
+    }
+
+    anyhow::Result::Err(anyhow!("Couldn't quite get there"))
 }

@@ -14,10 +14,6 @@ impl<const N: usize> BitSet<N> {
         self.bits[offset / BITS_PER_WORD] |= 1 << offset % BITS_PER_WORD;
     }
 
-    // pub(crate) fn reset(&mut self, offset: usize) {
-    //     self.bits[offset / BITS_PER_WORD] &= !(1 << offset % BITS_PER_WORD);
-    // }
-
     pub(crate) fn pop_cnt(&self) -> usize {
         let mut count = 0;
         for i in 0..self.bits.len() {
@@ -40,30 +36,6 @@ impl<const N: usize> BitSet<N> {
     }
 
     pub(crate) fn clear_all_except_nth_set_bit(&mut self, nth_bit: usize) {
-        // let mut index = 0;
-        // loop {
-        //     if self.bits[index].count_ones() as usize > nth_bit {
-        //         nth_bit -= self.bits[index].count_ones() as usize;
-        //         break;
-        //     }
-        //     index += 1;
-        // }
-
-        // for i in 0..std::mem::size_of::<usize>() * 8 {
-        //     if self.bits[index] & (1 << i) == (1 << i) {
-        //         nth_bit -= 1;
-        //     }
-
-        //     if nth_bit == 0 {
-        //         index = index * std::mem::size_of::<usize>() * 8 + i;
-        //         break;
-        //     }
-        // }
-
-        // let new = [0; N];
-        // self.bits = new;
-
-        // self.set(index);
         let mut v = 0;
         let mut was_set = false;
 
