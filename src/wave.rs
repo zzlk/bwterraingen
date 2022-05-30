@@ -220,7 +220,7 @@ impl Wave {
                 // }
                 let allowed = get_allowed_rules(self.array[chosen_index], ordinal, &self.rules);
 
-                let old_len = chosen.pop_cnt;
+                let old_len = self.array[target].pop_cnt();
                 self.array[target].intersect(&allowed);
                 let new_len = self.array[target].pop_cnt();
 
@@ -240,7 +240,7 @@ impl Wave {
                     let mut was_found = false;
                     for i in &mut vec {
                         if i.target_index == target {
-                            i.pop_cnt = self.array[target].pop_cnt();
+                            i.pop_cnt = new_len;
                             was_found = true;
                             break;
                         }
@@ -248,7 +248,7 @@ impl Wave {
                     if !was_found {
                         vec.push(Node {
                             target_index: target,
-                            pop_cnt: self.array[target].pop_cnt(),
+                            pop_cnt: new_len,
                         });
                     }
 
