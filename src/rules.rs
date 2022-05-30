@@ -1,9 +1,11 @@
 use crate::DIRECTIONS;
 use anyhow::Result;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tracing::info;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Rules {
     pub(crate) ruleset: [HashMap<u16, HashSet<u16>>; 4],
     pub era: u16,

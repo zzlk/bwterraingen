@@ -2,12 +2,14 @@ use crate::rules::Rules;
 use anyhow::anyhow;
 use anyhow::Result;
 use std::collections::HashSet;
+use tracing::info;
 
-pub fn get_rules_from_chk(chk: &Vec<u8>) -> Result<Rules> {
-    let raw_chunks = bwmap::parse_chk(chk.as_slice());
+pub fn get_rules_from_chk(chk: &[u8]) -> Result<Rules> {
+    let raw_chunks = bwmap::parse_chk(chk);
     let merged_chunks = bwmap::merge_raw_chunks(raw_chunks.as_slice());
     let parsed_chunks = bwmap::parse_merged_chunks(&merged_chunks)?;
 
+    info!("parsed_chunks: {parsed_chunks:?}");
     let dim = {
         if let bwmap::ParsedChunk::DIM(r) = parsed_chunks
             .get(&bwmap::ChunkName::DIM)
@@ -56,7 +58,7 @@ pub fn get_rules_from_chk(chk: &Vec<u8>) -> Result<Rules> {
 }
 
 pub fn create_chk_from_wave(map: &Vec<u16>, era: u16, width: usize, height: usize) -> Vec<u8> {
-    let mut bytes = include_bytes!("template.chk").to_vec();
+    let mut bytes = include_bytes!("data/template.chk").to_vec();
 
     bytes.extend_from_slice(b"MASK");
     bytes.extend_from_slice(((width * height) as u32).to_le_bytes().as_slice());

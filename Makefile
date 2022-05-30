@@ -24,7 +24,7 @@ test:
 
 wasm:
 	cargo build --release --target=wasm32-unknown-unknown
-	wasm-bindgen target/wasm32-unknown-unknown/release/bwterraingen.wasm --out-dir temp
+	wasm-bindgen target/wasm32-unknown-unknown/release/bwterraingen.wasm --target no-modules --out-dir temp
 
 .PHONY: all image clean debug release push wasm target/x86_64-unknown-linux-gnu/debug/bwterraingen target/x86_64-unknown-linux-gnu/release/bwterraingen
 
