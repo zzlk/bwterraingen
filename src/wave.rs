@@ -8,9 +8,9 @@ use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::Ordering;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::rc::Rc;
-use tracing::{debug, info, instrument, trace};
+use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct Wave {
@@ -147,7 +147,7 @@ impl Wave {
     //     true
     // }
 
-    pub fn propagate(&mut self, start: usize, rng: &mut ThreadRng) -> bool {
+    pub fn propagate(&mut self, start: usize, _rng: &mut ThreadRng) -> bool {
         #[derive(Copy, Clone, Eq, PartialEq, Debug)]
         struct Node {
             target_index: usize,
