@@ -1,5 +1,7 @@
 use image::ImageDecoder;
 use image::ImageEncoder;
+use instant::Instant;
+use tracing::info;
 
 const MAPS: [&[u8]; 8] = [
     include_bytes!("data/terrain/badlands.cv5.bin"),
@@ -11,28 +13,37 @@ const MAPS: [&[u8]; 8] = [
     include_bytes!("data/terrain/ice.cv5.bin"),
     include_bytes!("data/terrain/twilight.cv5.bin"),
 ];
-const PNGS: [&[u8]; 8] = [
-    include_bytes!("data/terrain/badlands.png"),
-    include_bytes!("data/terrain/platform.png"),
-    include_bytes!("data/terrain/install.png"),
-    include_bytes!("data/terrain/ashworld.png"),
-    include_bytes!("data/terrain/jungle.png"),
-    include_bytes!("data/terrain/desert.png"),
-    include_bytes!("data/terrain/ice.png"),
-    include_bytes!("data/terrain/twilight.png"),
+const TILESHEETS: [&[u8]; 8] = [
+    include_bytes!("data/terrain/badlands.webp"),
+    include_bytes!("data/terrain/platform.webp"),
+    include_bytes!("data/terrain/install.webp"),
+    include_bytes!("data/terrain/ashworld.webp"),
+    include_bytes!("data/terrain/jungle.webp"),
+    include_bytes!("data/terrain/desert.webp"),
+    include_bytes!("data/terrain/ice.webp"),
+    include_bytes!("data/terrain/twilight.webp"),
 ];
 
 pub(crate) fn render(mtxm: &[u16], width: usize, height: usize, era: usize) -> Vec<u8> {
+    let start = Instant::now();
     let mut png = Vec::<u8>::new();
     let mut tile_map = Vec::new();
 
     {
-        let decoder = image::codecs::png::PngDecoder::new(PNGS[era]).unwrap();
+        let decoder = image::codecs::webp::WebPDecoder::new(TILESHEETS[era]).unwrap();
 
         tile_map.resize(decoder.total_bytes() as usize, 0);
 
         decoder.read_image(tile_map.as_mut_slice()).unwrap();
     }
+
+    // {
+    //     let decoder = image::codecs::png::PngDecoder::new(TILESHEETS[era]).unwrap();
+
+    //     tile_map.resize(decoder.total_bytes() as usize, 0);
+
+    //     decoder.read_image(tile_map.as_mut_slice()).unwrap();
+    // }
 
     let mtxm_tile_map: &[u16] = {
         fn reinterpret_slice2<T: Sized>(s: &[u8]) -> &[T] {
@@ -74,14 +85,14 @@ pub(crate) fn render(mtxm: &[u16], width: usize, height: usize, era: usize) -> V
                             (output_x + i) as u32,
                             (output_y + j) as u32,
                             image::Rgb([
-                                tile_map[(input_x + i) as usize * 3
-                                    + (input_y + j) as usize * 64 * 32 * 3
+                                tile_map[(input_x + i) as usize * 4
+                                    + (input_y + j) as usize * 64 * 32 * 4
                                     + 0],
-                                tile_map[(input_x + i) as usize * 3
-                                    + (input_y + j) as usize * 64 * 32 * 3
+                                tile_map[(input_x + i) as usize * 4
+                                    + (input_y + j) as usize * 64 * 32 * 4
                                     + 1],
-                                tile_map[(input_x + i) as usize * 3
-                                    + (input_y + j) as usize * 64 * 32 * 3
+                                tile_map[(input_x + i) as usize * 4
+                                    + (input_y + j) as usize * 64 * 32 * 4
                                     + 2],
                             ]),
                         );
@@ -100,5 +111,9 @@ pub(crate) fn render(mtxm: &[u16], width: usize, height: usize, era: usize) -> V
             .unwrap();
     }
 
+    info!(
+        "rendering time: {}",
+        Instant::now().duration_since(start).as_micros()
+    );
     png
 }
