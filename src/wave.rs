@@ -7,8 +7,8 @@ use instant::Instant;
 use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
-use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::cmp::{self, Ordering};
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use tracing::info;
 
@@ -24,7 +24,7 @@ pub struct Wave {
 #[cached(
     key = "(BitSet<N>, usize)",
     convert = r#"{ (bitset, ordinal) }"#,
-    size = 100000
+    size = 20000000
 )]
 fn get_allowed_rules(
     bitset: BitSet<N>,
@@ -263,11 +263,12 @@ impl Wave {
     }
 
     pub fn get_entropy_indices_in_order(
-        &mut self,
+        &self,
         mut rng: &mut ThreadRng,
+        at_least: usize,
     ) -> Result<Vec<(usize, usize)>> {
         // TODO: use real entropy instead of number of possibilities. Requires tile weights.
-        let entropies = self
+        let mut entropies = self
             .array
             .iter()
             .map(|x| x.pop_cnt())
@@ -277,19 +278,26 @@ impl Wave {
 
         anyhow::ensure!(entropies.len() >= 1);
 
-        let minimum_entropy = entropies
-            .iter()
-            .map(|x| x.1)
-            .min()
-            .ok_or(anyhow!("something"))?;
-        let mut entropies: Vec<_> = entropies
-            .into_iter()
-            .filter(|v| v.1 <= minimum_entropy)
-            .collect();
-
         entropies.shuffle(&mut rng);
-
         entropies.sort_unstable_by_key(|x| x.1);
+
+        // let minimum_entropy = entropies
+        //     .iter()
+        //     .map(|x| x.1)
+        //     .min()
+        //     .ok_or(anyhow!("something"))?;
+        // let num_minimums = entropies.iter().filter(|v| v.1 <= minimum_entropy).count();
+
+        // let mut entropies: Vec<_> = entropies
+        //     .into_iter()
+        //     .filter(|v| v.1 <= minimum_entropy)
+        //     .collect();
+
+        // entropies.shuffle(&mut rng);
+
+        // entropies.sort_unstable_by_key(|x| x.1);
+
+        entropies.truncate(cmp::max(2, at_least));
 
         anyhow::Ok(entropies)
     }
@@ -306,84 +314,67 @@ impl Wave {
 
     pub fn logical_conclusion<F: Fn(&Wave)>(&self, update: &F) -> Result<Wave> {
         let mut rng = rand::thread_rng();
+
         let mut last_time = Instant::now();
 
-        anyhow::Ok(loop {
-            let mut fail_count = 0;
+        let mut waves = VecDeque::new();
+        let mut indices = VecDeque::new();
 
-            //info!("START");
+        let mut current_wave = self.clone();
+        let mut current_indices;
 
-            if let Ok(wave) = process_wave(
-                self.clone(),
-                &mut rng,
-                0,
-                &mut last_time,
-                &mut fail_count,
-                update,
-            ) {
-                break wave;
-            } else {
+        current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
+
+        loop {
+            while waves.len() > 100 {
+                // We're not going to go back 100 iterations, so, start dropping those ones so we don't run out of memory.
+                waves.pop_back();
+                indices.pop_back();
+            }
+
+            let current_index = current_indices.pop();
+
+            if current_index == None {
+                current_indices = indices.pop_front().unwrap();
+                current_wave = waves.pop_front().unwrap();
                 continue;
-            };
-        })
-    }
-}
-
-fn process_wave<F: Fn(&Wave)>(
-    mut wave: Wave,
-    mut rng: &mut ThreadRng,
-    depth: usize,
-    last_time: &mut Instant,
-    fail_count: &mut usize,
-    update: &F,
-) -> Result<Wave> {
-    //info!("depth: {depth:5}, fail_count: {fail_count:6}",);
-
-    // if Instant::now().duration_since(*last_time).as_millis() > 1500 {
-    //     *last_time = Instant::now();
-    //     //info!("depth: {depth:5}, fail_count: {fail_count:6}",);
-    //     update(&wave);
-    // }
-
-    if wave.is_done() {
-        return anyhow::Ok(wave);
-    }
-
-    let indices = wave.get_entropy_indices_in_order(&mut rng)?;
-
-    for (index, _pop_cnt) in &indices {
-        if Instant::now().duration_since(*last_time).as_millis() > 2500 {
-            *last_time = Instant::now();
-            //info!("depth: {depth:5}, fail_count: {fail_count:6}",);
-            update(&wave);
-        }
-
-        // if *fail_count > 5000 {
-        //     return anyhow::Ok(wave);
-        // }
-
-        let mut wave2 = wave.clone();
-
-        let chosen_possibility = wave2.collapse_index(&mut rng, *index);
-
-        if !wave2.propagate(*index, rng) {
-            wave.remove_possibility_at_index(*index, chosen_possibility);
-            if !wave.propagate(*index, rng) {
-                panic!();
             }
-            continue;
-        }
 
-        if let Ok(ret) = process_wave(wave2, rng, depth + 1, last_time, fail_count, update) {
-            return anyhow::Ok(ret);
-        } else {
-            wave.remove_possibility_at_index(*index, chosen_possibility);
-            if !wave.propagate(*index, rng) {
-                panic!();
+            let (index, _pop_cnt) = current_index.unwrap();
+
+            if Instant::now().duration_since(last_time).as_millis() > 2500 {
+                last_time = Instant::now();
+                update(&current_wave);
             }
-            *fail_count += 1;
+
+            let mut wave2 = current_wave.clone();
+
+            let chosen_possibility = wave2.collapse_index(&mut rng, index);
+
+            if !wave2.propagate(index, &mut rng) {
+                current_wave.remove_possibility_at_index(index, chosen_possibility);
+                if !current_wave.propagate(index, &mut rng) {
+                    panic!();
+                }
+                continue;
+            }
+
+            if wave2.is_done() {
+                return anyhow::Ok(wave2);
+            }
+
+            info!(
+                "waves.len: {}, indices.len: {}, {:?}",
+                waves.len(),
+                indices.len(),
+                current_indices
+            );
+
+            // this would normally be a recursive call but I can't figure out how to increase the stack size in wasm.
+            waves.push_front(current_wave);
+            indices.push_front(current_indices);
+            current_wave = wave2;
+            current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 2)?;
         }
     }
-
-    anyhow::Result::Err(anyhow!("Couldn't quite get there"))
 }

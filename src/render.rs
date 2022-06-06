@@ -98,15 +98,45 @@ pub fn render(mtxm: &[u16], width: usize, height: usize, era: usize) -> Vec<u8> 
                             (output_x + i) as u32,
                             (output_y + j) as u32,
                             image::Rgb([
-                                tile_map[(input_x + i) as usize * 4
-                                    + (input_y + j) as usize * 64 * 32 * 4
-                                    + 0],
-                                tile_map[(input_x + i) as usize * 4
-                                    + (input_y + j) as usize * 64 * 32 * 4
-                                    + 1],
-                                tile_map[(input_x + i) as usize * 4
-                                    + (input_y + j) as usize * 64 * 32 * 4
-                                    + 2],
+                                *tile_map
+                                    .get(
+                                        (input_x + i) as usize * 4
+                                            + (input_y + j) as usize * 64 * 32 * 4
+                                            + 0,
+                                    )
+                                    .unwrap_or_else(|| {
+                                        let p = (input_x + i) as usize * 4
+                                        + (input_y + j) as usize * 64 * 32 * 4
+                                        + 0;
+                                        info!("INVALID PIXEL. x: {x}, y: {y}, j: {j}, i: {i}, output_x: {output_x}, output_y: {output_y}, input_x: {input_x}, input_y: {input_y}, width: {width}, height: {height}, p: {p}, tilemap.len(): {}", tile_map.len());
+                                        panic!();
+                                    }),
+                                *tile_map
+                                    .get(
+                                        (input_x + i) as usize * 4
+                                            + (input_y + j) as usize * 64 * 32 * 4
+                                            + 1,
+                                    )
+                                    .unwrap_or_else(|| {
+                                        let p = (input_x + i) as usize * 4
+                                        + (input_y + j) as usize * 64 * 32 * 4
+                                        + 1;
+                                        info!("INVALID PIXEL. x: {x}, y: {y}, j: {j}, i: {i}, output_x: {output_x}, output_y: {output_y}, input_x: {input_x}, input_y: {input_y}, width: {width}, height: {height}, p: {p}, tilemap.len(): {}", tile_map.len());
+                                        panic!();
+                                    }),
+                                *tile_map
+                                    .get(
+                                        (input_x + i) as usize * 4
+                                            + (input_y + j) as usize * 64 * 32 * 4
+                                            + 2,
+                                    )
+                                    .unwrap_or_else(|| {
+                                        let p = (input_x + i) as usize * 4
+                                        + (input_y + j) as usize * 64 * 32 * 4
+                                        + 2;
+                                        info!("INVALID PIXEL. x: {x}, y: {y}, j: {j}, i: {i}, output_x: {output_x}, output_y: {output_y}, input_x: {input_x}, input_y: {input_y}, width: {width}, height: {height}, p: {p}, tilemap.len(): {}", tile_map.len());
+                                        panic!();
+                                    }),
                             ]),
                         );
                     }
