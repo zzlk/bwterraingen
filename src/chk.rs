@@ -9,7 +9,6 @@ pub fn get_rules_from_chk(chk: &[u8]) -> Result<Rules> {
     let merged_chunks = bwmap::merge_raw_chunks(raw_chunks.as_slice());
     let parsed_chunks = bwmap::parse_merged_chunks(&merged_chunks)?;
 
-    info!("parsed_chunks: {parsed_chunks:?}");
     let dim = {
         if let bwmap::ParsedChunk::DIM(r) = parsed_chunks
             .get(&bwmap::ChunkName::DIM)

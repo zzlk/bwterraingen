@@ -1,6 +1,6 @@
+use cached::proc_macro::cached;
 use image::ImageDecoder;
 use image::ImageEncoder;
-use instant::Instant;
 use tracing::info;
 
 const MAPS: [&[u8]; 8] = [
@@ -13,29 +13,42 @@ const MAPS: [&[u8]; 8] = [
     include_bytes!("data/terrain/ice.cv5.bin"),
     include_bytes!("data/terrain/twilight.cv5.bin"),
 ];
+
 const TILESHEETS: [&[u8]; 8] = [
-    include_bytes!("data/terrain/badlands.webp"),
-    include_bytes!("data/terrain/platform.webp"),
-    include_bytes!("data/terrain/install.webp"),
-    include_bytes!("data/terrain/ashworld.webp"),
-    include_bytes!("data/terrain/jungle.webp"),
-    include_bytes!("data/terrain/desert.webp"),
-    include_bytes!("data/terrain/ice.webp"),
-    include_bytes!("data/terrain/twilight.webp"),
+    include_bytes!("data/terrain/remaster/badlands.webp"),
+    include_bytes!("data/terrain/remaster/platform.webp"),
+    include_bytes!("data/terrain/remaster/install.webp"),
+    include_bytes!("data/terrain/remaster/ashworld.webp"),
+    include_bytes!("data/terrain/remaster/jungle.webp"),
+    include_bytes!("data/terrain/remaster/desert.webp"),
+    include_bytes!("data/terrain/remaster/ice.webp"),
+    include_bytes!("data/terrain/remaster/twilight.webp"),
 ];
 
-pub(crate) fn render(mtxm: &[u16], width: usize, height: usize, era: usize) -> Vec<u8> {
-    let start = Instant::now();
-    let mut png = Vec::<u8>::new();
+#[cached]
+fn get_tilesheet(era: usize) -> Vec<u8> {
     let mut tile_map = Vec::new();
+    let decoder = image::codecs::webp::WebPDecoder::new(TILESHEETS[era]).unwrap();
 
-    {
-        let decoder = image::codecs::webp::WebPDecoder::new(TILESHEETS[era]).unwrap();
+    tile_map.resize(decoder.total_bytes() as usize, 0);
 
-        tile_map.resize(decoder.total_bytes() as usize, 0);
+    decoder.read_image(tile_map.as_mut_slice()).unwrap();
 
-        decoder.read_image(tile_map.as_mut_slice()).unwrap();
-    }
+    tile_map
+}
+
+pub fn render(mtxm: &[u16], width: usize, height: usize, era: usize) -> Vec<u8> {
+    // let start = Instant::now();
+    let mut png = Vec::<u8>::new();
+    let tile_map = get_tilesheet(era);
+
+    // {
+    //     let decoder = image::codecs::webp::WebPDecoder::new(TILESHEETS[era]).unwrap();
+
+    //     tile_map.resize(decoder.total_bytes() as usize, 0);
+
+    //     decoder.read_image(tile_map.as_mut_slice()).unwrap();
+    // }
 
     // {
     //     let decoder = image::codecs::png::PngDecoder::new(TILESHEETS[era]).unwrap();
@@ -111,9 +124,9 @@ pub(crate) fn render(mtxm: &[u16], width: usize, height: usize, era: usize) -> V
             .unwrap();
     }
 
-    info!(
-        "rendering time: {}",
-        Instant::now().duration_since(start).as_micros()
-    );
+    // info!(
+    //     "rendering time: {}",
+    //     Instant::now().duration_since(start).as_micros()
+    // );
     png
 }

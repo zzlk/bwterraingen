@@ -14,6 +14,10 @@ impl<const N: usize> BitSet<N> {
         self.bits[offset / BITS_PER_WORD] |= 1 << offset % BITS_PER_WORD;
     }
 
+    pub(crate) fn reset(&mut self, offset: usize) {
+        self.bits[offset / BITS_PER_WORD] &= !(1 << offset % BITS_PER_WORD);
+    }
+
     pub(crate) fn pop_cnt(&self) -> usize {
         let mut count = 0;
         for i in 0..self.bits.len() {

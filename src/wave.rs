@@ -294,9 +294,14 @@ impl Wave {
         anyhow::Ok(entropies)
     }
 
-    pub fn collapse_index(&mut self, mut rng: &mut ThreadRng, index: usize) {
+    pub fn collapse_index(&mut self, mut rng: &mut ThreadRng, index: usize) -> usize {
         let chosen_bit = Uniform::from(0..self.array[index].pop_cnt()).sample(&mut rng);
         self.array[index].clear_all_except_nth_set_bit(chosen_bit);
+        chosen_bit
+    }
+
+    pub fn remove_possibility_at_index(&mut self, index: usize, possibility: usize) {
+        self.array[index].reset(possibility);
     }
 
     pub fn logical_conclusion<F: Fn(&Wave)>(&self, update: &F) -> Result<Wave> {
@@ -306,7 +311,7 @@ impl Wave {
         anyhow::Ok(loop {
             let mut fail_count = 0;
 
-            info!("RESTART");
+            info!("START");
 
             if let Ok(wave) = process_wave(
                 self.clone(),
@@ -332,11 +337,13 @@ pub fn process_wave<F: Fn(&Wave)>(
     fail_count: &mut usize,
     update: &F,
 ) -> Result<Wave> {
-    if Instant::now().duration_since(*last_time).as_millis() > 100 {
-        *last_time = Instant::now();
-        info!("depth: {depth:5}, fail_count: {fail_count:6}",);
-        update(&wave);
-    }
+    info!("depth: {depth:5}, fail_count: {fail_count:6}",);
+
+    // if Instant::now().duration_since(*last_time).as_millis() > 1500 {
+    //     *last_time = Instant::now();
+    //     //info!("depth: {depth:5}, fail_count: {fail_count:6}",);
+    //     update(&wave);
+    // }
 
     if wave.is_done() {
         return anyhow::Ok(wave);
@@ -345,27 +352,35 @@ pub fn process_wave<F: Fn(&Wave)>(
     let indices = wave.get_entropy_indices_in_order(&mut rng)?;
 
     for (index, _pop_cnt) in &indices {
-        if Instant::now().duration_since(*last_time).as_millis() > 100 {
+        if Instant::now().duration_since(*last_time).as_millis() > 2500 {
             *last_time = Instant::now();
-            info!("depth: {depth:5}, fail_count: {fail_count:6}",);
+            //info!("depth: {depth:5}, fail_count: {fail_count:6}",);
             update(&wave);
         }
 
-        if *fail_count > 5000 {
-            return anyhow::Ok(wave);
-        }
+        // if *fail_count > 5000 {
+        //     return anyhow::Ok(wave);
+        // }
 
-        let mut wave = wave.clone();
+        let mut wave2 = wave.clone();
 
-        wave.collapse_index(&mut rng, *index);
+        let chosen_possibility = wave2.collapse_index(&mut rng, *index);
 
-        if !wave.propagate(*index, rng) {
+        if !wave2.propagate(*index, rng) {
+            wave.remove_possibility_at_index(*index, chosen_possibility);
+            if !wave.propagate(*index, rng) {
+                panic!();
+            }
             continue;
         }
 
-        if let Ok(ret) = process_wave(wave.clone(), rng, depth + 1, last_time, fail_count, update) {
+        if let Ok(ret) = process_wave(wave2, rng, depth + 1, last_time, fail_count, update) {
             return anyhow::Ok(ret);
         } else {
+            wave.remove_possibility_at_index(*index, chosen_possibility);
+            if !wave.propagate(*index, rng) {
+                panic!();
+            }
             *fail_count += 1;
         }
     }

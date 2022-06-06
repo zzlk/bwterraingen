@@ -3,9 +3,6 @@ name = "bwterraingen"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-crate-type = ["cdylib"]
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -16,19 +13,12 @@ rand = { version = "*" }
 getrandom = { version = "0.2", features = ["js"] }
 cached = "*"
 
-serde = "*"
-serde_json = "*"
-
 instant = { version = "0.1", features = [ "wasm-bindgen", "inaccurate" ] }
-wasm-bindgen = "*"
-js-sys = "*"
-console_error_panic_hook = { version = "*" }
-tracing-wasm = "*"
+
+serde = "*"
 
 anyhow = "*"
 tracing = "*"
-#tracing-subscriber = { version = "*", features = ["registry", "env-filter"] }
-tracing-log = "*"
 
 [dev-dependencies]
 quickcheck = "*"
