@@ -311,7 +311,7 @@ impl Wave {
         anyhow::Ok(loop {
             let mut fail_count = 0;
 
-            info!("START");
+            //info!("START");
 
             if let Ok(wave) = process_wave(
                 self.clone(),
@@ -329,7 +329,7 @@ impl Wave {
     }
 }
 
-pub fn process_wave<F: Fn(&Wave)>(
+fn process_wave<F: Fn(&Wave)>(
     mut wave: Wave,
     mut rng: &mut ThreadRng,
     depth: usize,
@@ -337,7 +337,7 @@ pub fn process_wave<F: Fn(&Wave)>(
     fail_count: &mut usize,
     update: &F,
 ) -> Result<Wave> {
-    info!("depth: {depth:5}, fail_count: {fail_count:6}",);
+    //info!("depth: {depth:5}, fail_count: {fail_count:6}",);
 
     // if Instant::now().duration_since(*last_time).as_millis() > 1500 {
     //     *last_time = Instant::now();
