@@ -1,6 +1,5 @@
 mod bitset;
 mod chk;
-mod render;
 mod rules;
 mod wave;
 
@@ -11,5 +10,3 @@ pub use chk::create_chk_from_wave;
 pub use chk::get_rules_from_chk;
 pub use rules::Rules;
 pub use wave::Wave;
-
-pub use render::render;

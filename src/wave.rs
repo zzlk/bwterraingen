@@ -24,7 +24,7 @@ pub struct Wave {
 #[cached(
     key = "(BitSet<N>, usize)",
     convert = r#"{ (bitset, ordinal) }"#,
-    size = 20000000
+    size = 50000
 )]
 fn get_allowed_rules(
     bitset: BitSet<N>,
