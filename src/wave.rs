@@ -1,6 +1,5 @@
 use crate::{bitset::BitSet, rules::Rules};
 use crate::{DIRECTIONS, N};
-use anyhow::anyhow;
 use anyhow::Result;
 use cached::proc_macro::cached;
 use instant::Instant;
