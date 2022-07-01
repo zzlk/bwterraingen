@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 bwmap = { git = "ssh://git@github.com/zzlk/bwmap.git", default-features = false }
 
-image = { version = "*", features = ["png", "webp"] }
+#image = { version = "*", features = ["png", "webp"] }
 rand = { version = "*" }
 getrandom = { version = "0.2", features = ["js"] }
 cached = "*"
