@@ -244,6 +244,7 @@ impl Wave {
                             break;
                         }
                     }
+
                     if !was_found {
                         vec.push(Node {
                             target_index: target,
@@ -314,13 +315,14 @@ impl Wave {
     pub fn logical_conclusion<F: Fn(&Wave)>(&self, update: &F) -> Result<Wave> {
         let mut rng = rand::thread_rng();
 
-        let mut last_time = Instant::now();
-
         let mut waves = VecDeque::new();
         let mut indices = VecDeque::new();
 
         let mut current_wave = self.clone();
         let mut current_indices;
+
+        let mut last_time = Instant::now();
+        update(&current_wave);
 
         current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
 
