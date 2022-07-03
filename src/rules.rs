@@ -56,7 +56,7 @@ impl Rules {
     }
 
     pub fn combine(&self, other: &Rules) -> Result<Rules> {
-        anyhow::ensure!(self.era == other.era);
+        anyhow::ensure!(self.era % 8 == other.era % 8);
 
         let mut new_ruleset = [
             HashMap::new(),

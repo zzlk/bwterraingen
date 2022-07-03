@@ -364,12 +364,12 @@ impl Wave {
                 return anyhow::Ok(wave2);
             }
 
-            info!(
-                "waves.len: {}, indices.len: {}, {:?}",
-                waves.len(),
-                indices.len(),
-                current_indices
-            );
+            // info!(
+            //     "waves.len: {}, indices.len: {}, {:?}",
+            //     waves.len(),
+            //     indices.len(),
+            //     current_indices
+            // );
 
             // this would normally be a recursive call but I can't figure out how to increase the stack size in wasm.
             waves.push_front(current_wave);
