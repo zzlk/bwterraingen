@@ -23,7 +23,7 @@ pub struct Wave {
 #[cached(
     key = "(BitSet<N>, usize)",
     convert = r#"{ (bitset, ordinal) }"#,
-    size = 50000
+    size = 100000
 )]
 fn get_allowed_rules(
     bitset: BitSet<N>,
@@ -40,7 +40,13 @@ fn get_allowed_rules(
 }
 
 impl Wave {
-    pub fn new(width: usize, height: usize, rules: &Rules) -> Wave {
+    pub fn new(
+        width: usize,
+        height: usize,
+        rules: &Rules,
+        template_map: Option<Vec<u16>>,
+        template_map_mask_tile: u16,
+    ) -> Wave {
         // remap rules so they are not sparse
         let mut all_tiles = BitSet::<N>::new();
         let mut mapping = HashMap::new();
@@ -84,14 +90,29 @@ impl Wave {
             *new_rule = rule;
         }
 
-        //let wave =
+        let mut map = vec![all_tiles; width * height];
 
-        // wave.constrain();
+        // if a template map is given, collapse existing tiles.
+        if let Some(template_map) = template_map {
+            for (index, tile) in template_map.into_iter().enumerate() {
+                // add tiles in template map to mapping
+                if !mapping.contains_key(&tile) {
+                    inverse_mapping.insert(mapping.len(), tile);
+                    mapping.insert(tile, mapping.len());
+                }
+
+                if tile != template_map_mask_tile {
+                    let mut bs = BitSet::<N>::new();
+                    bs.set(mapping[&tile]);
+                    map[index] = bs;
+                }
+            }
+        }
 
         Wave {
             width: width as isize,
             height: height as isize,
-            array: vec![all_tiles; width * height],
+            array: map,
             rules: Rc::new(new_rules),
             inverse_mapping: Rc::new(inverse_mapping),
         }
@@ -134,19 +155,22 @@ impl Wave {
         true
     }
 
-    // pub fn constrain(&mut self) -> bool {
-    //     for y in 0..self.height {
-    //         for x in 0..self.width {
-    //             if !self.propagate((x + y * self.width) as usize) {
-    //                 return false;
-    //             }
-    //         }
-    //     }
+    pub fn constrain(&mut self) -> bool {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let index = (x + y * self.width) as usize;
+                if self.array[index].pop_cnt() > 1 {
+                    if !self.propagate_inwards(index) {
+                        return false;
+                    }
+                }
+            }
+        }
 
-    //     true
-    // }
+        true
+    }
 
-    pub fn propagate(&mut self, start: usize, _rng: &mut ThreadRng) -> bool {
+    pub fn propagate_inwards(&mut self, start: usize) -> bool {
         #[derive(Copy, Clone, Eq, PartialEq, Debug)]
         struct Node {
             target_index: usize,
@@ -169,19 +193,7 @@ impl Wave {
             }
         }
 
-        //let mut btree = std::collections::BTreeSet::<Node>::new();
-        // let mut heap = std::collections::BinaryHeap::<Node>::new();
-        // //let mut stack = VecDeque::new();
-        // heap.push(Node {
-        //     target_index: start,
-        //     pop_cnt: self.array[start].pop_cnt(),
-        // });
         let mut vec = Vec::<Node>::new();
-
-        // btree.insert(Node {
-        //     target_index: start,
-        //     pop_cnt: self.array[start].pop_cnt(),
-        // });
 
         vec.push(Node {
             target_index: start,
@@ -192,6 +204,104 @@ impl Wave {
             //info!("len: {}, heap: {:?}", vec.len(), vec);
             let chosen = vec.pop().unwrap();
             //info!("chosen: {:?}", chosen);
+            let chosen_index = chosen.target_index;
+
+            let old_len = self.array[chosen_index].pop_cnt();
+            for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                let (target_x, target_y) = (
+                    chosen_index as isize % self.width + direction.0,
+                    chosen_index as isize / self.width + direction.1,
+                );
+
+                // check if neighbor is outside the bounds.
+                if target_x < 0 || target_x >= self.width || target_y < 0 || target_y >= self.height
+                {
+                    continue;
+                }
+
+                let target = (target_x + target_y * self.width) as usize;
+
+                let allowed = get_allowed_rules(self.array[target], (ordinal + 2) % 4, &self.rules);
+
+                self.array[chosen_index].intersect(&allowed);
+            }
+
+            let new_len = self.array[chosen_index].pop_cnt();
+            if new_len == 0 {
+                // info!("ordinal: {ordinal}, chosen_index: {chosen_index}");
+                return false;
+            }
+
+            if new_len < old_len {
+                for (_ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                    let (target_x, target_y) = (
+                        chosen_index as isize % self.width + direction.0,
+                        chosen_index as isize / self.width + direction.1,
+                    );
+                    if target_x < 0
+                        || target_x >= self.width
+                        || target_y < 0
+                        || target_y >= self.height
+                    {
+                        continue;
+                    }
+                    let target = (target_x + target_y * self.width) as usize;
+                    let mut was_found = false;
+                    for i in &mut vec {
+                        if i.target_index == target {
+                            i.pop_cnt = new_len;
+                            was_found = true;
+                            break;
+                        }
+                    }
+
+                    if !was_found {
+                        vec.push(Node {
+                            target_index: target,
+                            pop_cnt: new_len,
+                        });
+                    }
+
+                    vec.sort_by(|a, b| b.pop_cnt.cmp(&a.pop_cnt));
+                }
+            }
+        }
+
+        true
+    }
+
+    pub fn propagate(&mut self, start: usize) -> bool {
+        #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+        struct Node {
+            target_index: usize,
+            pop_cnt: usize,
+        }
+
+        impl Ord for Node {
+            fn cmp(&self, other: &Self) -> Ordering {
+                // Notice that the we flip the ordering on costs.
+                // In case of a tie we compare positions - this step is necessary
+                // to make implementations of `PartialEq` and `Ord` consistent.
+                other.pop_cnt.cmp(&self.pop_cnt)
+            }
+        }
+
+        // `PartialOrd` needs to be implemented as well.
+        impl PartialOrd for Node {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        let mut vec = Vec::<Node>::new();
+
+        vec.push(Node {
+            target_index: start,
+            pop_cnt: self.array[start].pop_cnt(),
+        });
+
+        while vec.len() > 0 {
+            let chosen = vec.pop().unwrap();
             let chosen_index = chosen.target_index;
 
             for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
@@ -328,6 +438,12 @@ impl Wave {
         let mut last_time = Instant::now();
         update(&current_wave);
 
+        if !current_wave.constrain() {
+            panic!("wave is unsatisfiable");
+        }
+
+        current_wave.print_wave();
+
         current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
 
         loop {
@@ -356,9 +472,9 @@ impl Wave {
 
             let chosen_possibility = wave2.collapse_index(&mut rng, index);
 
-            if !wave2.propagate(index, &mut rng) {
+            if !wave2.propagate(index) {
                 current_wave.remove_possibility_at_index(index, chosen_possibility);
-                if !current_wave.propagate(index, &mut rng) {
+                if !current_wave.propagate(index) {
                     panic!();
                 }
                 continue;

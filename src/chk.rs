@@ -80,6 +80,36 @@ pub fn get_list_of_unique_tiles_from_chk(chk: &[u8]) -> Result<HashSet<u16>> {
     anyhow::Ok(set.drain().collect())
 }
 
+pub fn get_dim_from_chk(chk: &[u8]) -> Result<(u16, u16, Vec<u16>)> {
+    let raw_chunks = bwmap::parse_chk(chk);
+    let merged_chunks = bwmap::merge_raw_chunks(raw_chunks.as_slice());
+    let parsed_chunks = bwmap::parse_merged_chunks(&merged_chunks)?;
+
+    let dim = {
+        if let bwmap::ParsedChunk::DIM(r) = parsed_chunks
+            .get(&bwmap::ChunkName::DIM)
+            .ok_or(anyhow!("could't get dim section"))?
+        {
+            r
+        } else {
+            anyhow::bail!("couldn't do something with dim...")
+        }
+    };
+
+    let mtxm = {
+        if let bwmap::ParsedChunk::MTXM(r) = parsed_chunks
+            .get(&bwmap::ChunkName::MTXM)
+            .ok_or(anyhow!("could't get mtxm section"))?
+        {
+            r
+        } else {
+            anyhow::bail!("couldn't do something with mtxm...")
+        }
+    };
+
+    anyhow::Ok((*dim.width, *dim.height, mtxm.data.clone()))
+}
+
 pub fn create_chk_from_wave(map: &Vec<u16>, era: u16, width: usize, height: usize) -> Vec<u8> {
     let mut bytes = include_bytes!("data/template.chk").to_vec();
 
