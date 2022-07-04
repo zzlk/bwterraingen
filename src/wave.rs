@@ -2,7 +2,7 @@ use crate::{bitset::BitSet, rules::Rules};
 use crate::{DIRECTIONS, N};
 use anyhow::Result;
 use cached::proc_macro::cached;
-use instant::Instant;
+use instant::{Duration, Instant};
 use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
@@ -312,7 +312,11 @@ impl Wave {
         self.array[index].reset(possibility);
     }
 
-    pub fn logical_conclusion<F: Fn(&Wave)>(&self, update: &F) -> Result<Wave> {
+    pub fn logical_conclusion<F: Fn(&Wave)>(
+        &self,
+        update: &F,
+        update_interval: u32,
+    ) -> Result<Wave> {
         let mut rng = rand::thread_rng();
 
         let mut waves = VecDeque::new();
@@ -343,7 +347,7 @@ impl Wave {
 
             let (index, _pop_cnt) = current_index.unwrap();
 
-            if Instant::now().duration_since(last_time).as_millis() > 2500 {
+            if Instant::now().duration_since(last_time).as_millis() as u32 > update_interval {
                 last_time = Instant::now();
                 update(&current_wave);
             }

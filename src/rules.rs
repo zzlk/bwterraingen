@@ -93,6 +93,19 @@ impl Rules {
         })
     }
 
+    pub fn subtract(&self, tiles: &HashSet<u16>) -> Result<Rules> {
+        let mut new_ruleset = self.clone();
+
+        for rules in new_ruleset.ruleset.iter_mut() {
+            rules.retain(|k, _| !tiles.contains(k));
+            for (_, allowed_tiles) in rules {
+                *allowed_tiles = allowed_tiles.difference(tiles).cloned().collect();
+            }
+        }
+
+        anyhow::Ok(new_ruleset)
+    }
+
     pub fn print_rules(&self) {
         for (ordinal, direction) in ["North", "East", "South", "West"].iter().enumerate() {
             let rule = &self.ruleset[ordinal];
