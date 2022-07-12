@@ -1,6 +1,6 @@
 #[derive(Eq, PartialEq, Clone, Debug, Hash, Copy)]
 pub(crate) struct BitSet<const N: usize> {
-    bits: [usize; N],
+    pub bits: [usize; N],
 }
 
 const BITS_PER_WORD: usize = std::mem::size_of::<usize>() * 8;
@@ -16,6 +16,22 @@ impl<const N: usize> BitSet<N> {
 
     pub(crate) fn reset(&mut self, offset: usize) {
         self.bits[offset / BITS_PER_WORD] &= !(1 << offset % BITS_PER_WORD);
+    }
+
+    pub(crate) fn get(&self, offset: usize) -> bool {
+        (self.bits[offset / BITS_PER_WORD] & 1 << offset % BITS_PER_WORD) != 0
+    }
+
+    pub(crate) fn slice(&self, offset: usize, end: usize) -> BitSet<N> {
+        let mut bs = BitSet::<N>::new();
+
+        for i in offset..end {
+            if self.get(i) {
+                bs.set(i);
+            }
+        }
+
+        bs
     }
 
     pub(crate) fn pop_cnt(&self) -> usize {

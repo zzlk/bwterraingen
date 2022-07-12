@@ -2,12 +2,12 @@ use crate::{bitset::BitSet, rules::Rules};
 use crate::{DIRECTIONS, N};
 use anyhow::Result;
 use cached::proc_macro::cached;
-use instant::{Duration, Instant};
+use instant::Instant;
 use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::{self, Ordering};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use tracing::info;
 
@@ -18,25 +18,90 @@ pub struct Wave {
     array: Vec<BitSet<N>>,
     rules: Rc<[HashMap<usize, BitSet<N>>; 4]>,
     inverse_mapping: Rc<HashMap<usize, u16>>,
+    no_propagate_indices: Vec<bool>,
 }
 
+// #[cached(
+//     key = "(BitSet<N>, usize, usize, usize)",
+//     convert = r#"{ (*bitset, ordinal, upper, lower) }"#,
+//     size = 10000000
+// )]
+// fn get_allowed_rules_sub(
+//     bitset: &BitSet<N>,
+//     ordinal: usize,
+//     upper: usize,
+//     lower: usize,
+//     rules: &[HashMap<usize, BitSet<N>>; 4],
+// ) -> BitSet<N> {
+//     if (upper - lower) <= 1 {
+//         if bitset.get(lower) {
+//             if let Some(bs) = rules[ordinal].get(&lower) {
+//                 *bs
+//             } else {
+//                 BitSet::<N>::new()
+//             }
+//         } else {
+//             BitSet::<N>::new()
+//         }
+//     } else {
+//         let mut lower_bs =
+//             get_allowed_rules_sub(bitset, ordinal, (upper + lower) / 2, lower, rules);
+//         let upper_bs = get_allowed_rules_sub(bitset, ordinal, upper, (upper + lower) / 2, rules);
+
+//         lower_bs.union(&upper_bs);
+
+//         lower_bs
+//     }
+// }
+
 #[cached(
-    key = "(BitSet<N>, usize)",
-    convert = r#"{ (bitset, ordinal) }"#,
-    size = 100000
+    key = "(BitSet<N>, usize, usize, usize)",
+    convert = r#"{ (*bitset, ordinal, upper, lower) }"#,
+    size = 10000000
 )]
+fn get_allowed_rules_sub(
+    bitset: &BitSet<N>,
+    ordinal: usize,
+    upper: usize,
+    lower: usize,
+    rules: &[HashMap<usize, BitSet<N>>; 4],
+) -> BitSet<N> {
+    let mut allowed = BitSet::new();
+
+    for x in bitset
+        .iter()
+        .filter(|&x| x >= lower && x < upper)
+        .filter_map(|x| rules[ordinal].get(&x))
+    {
+        allowed.union(x);
+    }
+    allowed
+}
+
+// #[cached(
+//     key = "(BitSet<N>, usize)",
+//     convert = r#"{ (*bitset, ordinal) }"#,
+//     size = 1000000
+// )]
 fn get_allowed_rules(
-    bitset: BitSet<N>,
+    bitset: &BitSet<N>,
     ordinal: usize,
     rules: &[HashMap<usize, BitSet<N>>; 4],
 ) -> BitSet<N> {
     // trace!("get_allowed_rules. ordinal: {ordinal}");
-    let mut allowed = BitSet::new();
 
-    for x in bitset.iter().filter_map(|x| rules[ordinal].get(&x)) {
-        allowed.union(x);
+    let mut bs = BitSet::<N>::new();
+
+    const FRACT: usize = 8;
+    for i in 0..FRACT {
+        let start = i * (N / FRACT * std::mem::size_of::<usize>() * 8);
+        let end = (i + 1) * (N / FRACT * std::mem::size_of::<usize>() * 8);
+        let slice = bitset.slice(start, end);
+
+        bs.union(&get_allowed_rules_sub(&slice, ordinal, end, start, rules));
     }
-    allowed
+
+    bs
 }
 
 impl Wave {
@@ -92,6 +157,8 @@ impl Wave {
 
         let mut map = vec![all_tiles; width * height];
 
+        let mut no_propagate_indices = vec![false; width * height];
+
         // if a template map is given, collapse existing tiles.
         if let Some(template_map) = template_map {
             for (index, tile) in template_map.into_iter().enumerate() {
@@ -105,6 +172,7 @@ impl Wave {
                     let mut bs = BitSet::<N>::new();
                     bs.set(mapping[&tile]);
                     map[index] = bs;
+                    no_propagate_indices[index] = true;
                 }
             }
         }
@@ -115,6 +183,7 @@ impl Wave {
             array: map,
             rules: Rc::new(new_rules),
             inverse_mapping: Rc::new(inverse_mapping),
+            no_propagate_indices: no_propagate_indices,
         }
     }
 
@@ -124,12 +193,12 @@ impl Wave {
             let mut output = String::new();
             for x in 0..self.width {
                 output = format!(
-                    "{}{:4x}",
+                    "{}{:6}",
                     output,
                     self.array[(x + y * self.width) as usize].pop_cnt()
                 );
             }
-            info!("        {}", output);
+            info!("{}", output);
         }
     }
 
@@ -159,10 +228,10 @@ impl Wave {
         for y in 0..self.height {
             for x in 0..self.width {
                 let index = (x + y * self.width) as usize;
-                if self.array[index].pop_cnt() > 1 {
-                    if !self.propagate_inwards(index) {
-                        return false;
-                    }
+                if !self.propagate(index) {
+                    info!("x: {x}, y: {y}");
+                    self.print_wave();
+                    return false;
                 }
             }
         }
@@ -170,107 +239,121 @@ impl Wave {
         true
     }
 
-    pub fn propagate_inwards(&mut self, start: usize) -> bool {
-        #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-        struct Node {
-            target_index: usize,
-            pop_cnt: usize,
-        }
+    // pub fn propagate_inwards(&mut self, start: usize) -> bool {
+    //     #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+    //     struct Node {
+    //         target_index: usize,
+    //         pop_cnt: usize,
+    //     }
 
-        impl Ord for Node {
-            fn cmp(&self, other: &Self) -> Ordering {
-                // Notice that the we flip the ordering on costs.
-                // In case of a tie we compare positions - this step is necessary
-                // to make implementations of `PartialEq` and `Ord` consistent.
-                other.pop_cnt.cmp(&self.pop_cnt)
-            }
-        }
+    //     impl Ord for Node {
+    //         fn cmp(&self, other: &Self) -> Ordering {
+    //             // Notice that the we flip the ordering on costs.
+    //             // In case of a tie we compare positions - this step is necessary
+    //             // to make implementations of `PartialEq` and `Ord` consistent.
+    //             other.pop_cnt.cmp(&self.pop_cnt)
+    //         }
+    //     }
 
-        // `PartialOrd` needs to be implemented as well.
-        impl PartialOrd for Node {
-            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                Some(self.cmp(other))
-            }
-        }
+    //     // `PartialOrd` needs to be implemented as well.
+    //     impl PartialOrd for Node {
+    //         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    //             Some(self.cmp(other))
+    //         }
+    //     }
 
-        let mut vec = Vec::<Node>::new();
+    //     let mut vec = Vec::<Node>::new();
 
-        vec.push(Node {
-            target_index: start,
-            pop_cnt: self.array[start].pop_cnt(),
-        });
+    //     vec.push(Node {
+    //         target_index: start,
+    //         pop_cnt: self.array[start].pop_cnt(),
+    //     });
 
-        while vec.len() > 0 {
-            //info!("len: {}, heap: {:?}", vec.len(), vec);
-            let chosen = vec.pop().unwrap();
-            //info!("chosen: {:?}", chosen);
-            let chosen_index = chosen.target_index;
+    //     while vec.len() > 0 {
+    //         //info!("len: {}, heap: {:?}", vec.len(), vec);
+    //         let chosen = vec.pop().unwrap();
+    //         //info!("chosen: {:?}", chosen);
+    //         let chosen_index = chosen.target_index;
 
-            let old_len = self.array[chosen_index].pop_cnt();
-            for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                let (target_x, target_y) = (
-                    chosen_index as isize % self.width + direction.0,
-                    chosen_index as isize / self.width + direction.1,
-                );
+    //         let old_len = self.array[chosen_index].pop_cnt();
+    //         for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+    //             let (target_x, target_y) = (
+    //                 chosen_index as isize % self.width + direction.0,
+    //                 chosen_index as isize / self.width + direction.1,
+    //             );
 
-                // check if neighbor is outside the bounds.
-                if target_x < 0 || target_x >= self.width || target_y < 0 || target_y >= self.height
-                {
-                    continue;
-                }
+    //             // check if neighbor is outside the bounds.
+    //             if target_x < 0 || target_x >= self.width || target_y < 0 || target_y >= self.height
+    //             {
+    //                 continue;
+    //             }
 
-                let target = (target_x + target_y * self.width) as usize;
+    //             let target = (target_x + target_y * self.width) as usize;
 
-                let allowed = get_allowed_rules(self.array[target], (ordinal + 2) % 4, &self.rules);
+    //             let allowed = get_allowed_rules(self.array[target], (ordinal + 2) % 4, &self.rules);
 
-                self.array[chosen_index].intersect(&allowed);
-            }
+    //             self.array[chosen_index].intersect(&allowed);
+    //         }
 
-            let new_len = self.array[chosen_index].pop_cnt();
-            if new_len == 0 {
-                // info!("ordinal: {ordinal}, chosen_index: {chosen_index}");
-                return false;
-            }
+    //         let new_len = self.array[chosen_index].pop_cnt();
+    //         if new_len == 0 {
+    //             let (x, y) = (
+    //                 chosen_index as isize % self.width,
+    //                 chosen_index as isize / self.width,
+    //             );
 
-            if new_len < old_len {
-                for (_ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                    let (target_x, target_y) = (
-                        chosen_index as isize % self.width + direction.0,
-                        chosen_index as isize / self.width + direction.1,
-                    );
-                    if target_x < 0
-                        || target_x >= self.width
-                        || target_y < 0
-                        || target_y >= self.height
-                    {
-                        continue;
-                    }
-                    let target = (target_x + target_y * self.width) as usize;
-                    let mut was_found = false;
-                    for i in &mut vec {
-                        if i.target_index == target {
-                            i.pop_cnt = new_len;
-                            was_found = true;
-                            break;
-                        }
-                    }
+    //             info!("propagate inwards. chosen_index: {chosen_index}, x: {x}, y: {y}");
+    //             return false;
+    //         }
 
-                    if !was_found {
-                        vec.push(Node {
-                            target_index: target,
-                            pop_cnt: new_len,
-                        });
-                    }
+    //         if new_len < old_len {
+    //             for (_ordinal, direction) in DIRECTIONS.iter().enumerate() {
+    //                 let (target_x, target_y) = (
+    //                     chosen_index as isize % self.width + direction.0,
+    //                     chosen_index as isize / self.width + direction.1,
+    //                 );
+    //                 if target_x < 0
+    //                     || target_x >= self.width
+    //                     || target_y < 0
+    //                     || target_y >= self.height
+    //                 {
+    //                     continue;
+    //                 }
+    //                 let target = (target_x + target_y * self.width) as usize;
+    //                 let mut was_found = false;
+    //                 for i in &mut vec {
+    //                     if i.target_index == target {
+    //                         i.pop_cnt = new_len;
+    //                         was_found = true;
+    //                         break;
+    //                     }
+    //                 }
 
-                    vec.sort_by(|a, b| b.pop_cnt.cmp(&a.pop_cnt));
-                }
-            }
-        }
+    //                 if !was_found {
+    //                     vec.push(Node {
+    //                         target_index: target,
+    //                         pop_cnt: new_len,
+    //                     });
+    //                 }
 
-        true
-    }
+    //                 vec.sort_by(|a, b| b.pop_cnt.cmp(&a.pop_cnt));
+    //             }
+    //         }
+    //     }
+
+    //     true
+    // }
 
     pub fn propagate(&mut self, start: usize) -> bool {
+        // {
+        //     let m = GET_ALLOWED_RULES_SUB.lock().unwrap();
+        //     info!("cache size: {}", m.key_order().count());
+        //     let item = m.key_order().next();
+        //     if let Some(x) = item {
+        //         info!("cache example: {:?}", x);
+        //     }
+        // }
+
         #[derive(Copy, Clone, Eq, PartialEq, Debug)]
         struct Node {
             target_index: usize,
@@ -317,6 +400,10 @@ impl Wave {
                 }
 
                 let target = (target_x + target_y * self.width) as usize;
+
+                if self.no_propagate_indices[target] {
+                    continue;
+                }
 
                 // let rules = &self.rules[ordinal];
 
@@ -327,7 +414,8 @@ impl Wave {
                 // {
                 //     allowed.union(x);
                 // }
-                let allowed = get_allowed_rules(self.array[chosen_index], ordinal, &self.rules);
+
+                let allowed = get_allowed_rules(&self.array[chosen_index], ordinal, &self.rules);
 
                 let old_len = self.array[target].pop_cnt();
                 self.array[target].intersect(&allowed);
@@ -363,8 +451,6 @@ impl Wave {
                     }
 
                     vec.sort_by(|a, b| b.pop_cnt.cmp(&a.pop_cnt));
-
-                    //btree.get(t
                 }
             }
         }
@@ -438,6 +524,8 @@ impl Wave {
         let mut last_time = Instant::now();
         update(&current_wave);
 
+        current_wave.print_wave();
+
         if !current_wave.constrain() {
             panic!("wave is unsatisfiable");
         }
@@ -447,7 +535,7 @@ impl Wave {
         current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
 
         loop {
-            while waves.len() > 100 {
+            while waves.len() > 200 {
                 // We're not going to go back 100 iterations, so, start dropping those ones so we don't run out of memory.
                 waves.pop_back();
                 indices.pop_back();
