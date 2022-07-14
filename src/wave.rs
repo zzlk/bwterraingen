@@ -7,9 +7,9 @@ use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::{self, Ordering};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use tracing::info;
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct Wave {
@@ -92,7 +92,7 @@ fn get_allowed_rules(
 
     let mut bs = BitSet::<N>::new();
 
-    const FRACT: usize = 8;
+    const FRACT: usize = 4;
     for i in 0..FRACT {
         let start = i * (N / FRACT * std::mem::size_of::<usize>() * 8);
         let end = (i + 1) * (N / FRACT * std::mem::size_of::<usize>() * 8);
@@ -345,6 +345,7 @@ impl Wave {
     // }
 
     pub fn propagate(&mut self, start: usize) -> bool {
+        // warn!("PROPAGATE");
         // {
         //     let m = GET_ALLOWED_RULES_SUB.lock().unwrap();
         //     info!("cache size: {}", m.key_order().count());
@@ -387,6 +388,15 @@ impl Wave {
             let chosen = vec.pop().unwrap();
             let chosen_index = chosen.target_index;
 
+            // {
+            //     let (x, y) = (
+            //         chosen_index as isize % self.width,
+            //         chosen_index as isize / self.width,
+            //     );
+
+            //     warn!("propagate iter from: {x}, {y}");
+            // }
+
             for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
                 let (target_x, target_y) = (
                     chosen_index as isize % self.width + direction.0,
@@ -427,13 +437,6 @@ impl Wave {
                 }
 
                 if new_len < old_len {
-                    // stack.push_back(target);
-                    // heap.retain(|x| x.target_index != target);
-                    // heap.heap.push(Node {
-                    //     target_index: target,
-                    //     pop_cnt: self.array[target].pop_cnt(),
-                    // });
-
                     let mut was_found = false;
                     for i in &mut vec {
                         if i.target_index == target {
@@ -454,6 +457,8 @@ impl Wave {
                 }
             }
         }
+
+        // self.print_wave();
 
         true
     }
@@ -524,12 +529,14 @@ impl Wave {
         let mut last_time = Instant::now();
         update(&current_wave);
 
+        warn!("Initial Wave");
         current_wave.print_wave();
 
         if !current_wave.constrain() {
             panic!("wave is unsatisfiable");
         }
 
+        warn!("Wave following Constrain");
         current_wave.print_wave();
 
         current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
@@ -544,6 +551,8 @@ impl Wave {
             let current_index = current_indices.pop();
 
             if current_index == None {
+                error!("current_indices: {current_indices:?}");
+                error!("current_wave: {current_wave:?}");
                 current_indices = indices.pop_front().unwrap();
                 current_wave = waves.pop_front().unwrap();
                 continue;
@@ -558,13 +567,14 @@ impl Wave {
 
             let mut wave2 = current_wave.clone();
 
-            let chosen_possibility = wave2.collapse_index(&mut rng, index);
+            let _chosen_possibility = wave2.collapse_index(&mut rng, index);
+            // wave2.print_wave();
 
             if !wave2.propagate(index) {
-                current_wave.remove_possibility_at_index(index, chosen_possibility);
-                if !current_wave.propagate(index) {
-                    panic!();
-                }
+                // current_wave.remove_possibility_at_index(index, chosen_possibility);
+                // if !current_wave.propagate(index) {
+                //     panic!();
+                // }
                 continue;
             }
 
