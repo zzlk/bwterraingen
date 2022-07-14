@@ -92,7 +92,7 @@ fn get_allowed_rules(
 
     let mut bs = BitSet::<N>::new();
 
-    const FRACT: usize = 4;
+    const FRACT: usize = 16;
     for i in 0..FRACT {
         let start = i * (N / FRACT * std::mem::size_of::<usize>() * 8);
         let end = (i + 1) * (N / FRACT * std::mem::size_of::<usize>() * 8);
@@ -567,14 +567,10 @@ impl Wave {
 
             let mut wave2 = current_wave.clone();
 
-            let _chosen_possibility = wave2.collapse_index(&mut rng, index);
+            wave2.collapse_index(&mut rng, index);
             // wave2.print_wave();
 
             if !wave2.propagate(index) {
-                // current_wave.remove_possibility_at_index(index, chosen_possibility);
-                // if !current_wave.propagate(index) {
-                //     panic!();
-                // }
                 continue;
             }
 
