@@ -1,12 +1,13 @@
 use crate::rules::Rules;
 use crate::DIRECTIONS;
 use anyhow::Result;
+use cached::CachedAsync;
 use instant::Instant;
 use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::{self, Ordering};
-use std::collections::{HashMap, HashSet, VecDeque, LinkedList};
+use std::collections::{HashMap, HashSet, LinkedList, VecDeque};
 use std::rc::Rc;
 use tracing::{debug, error, info, warn};
 
@@ -16,6 +17,7 @@ pub struct Wave2 {
     pub height: isize,
     cells: Vec<HashMap<u16, [i16; 4]>>,
     rules: Rc<Rules>,
+    example_cell: Rc<HashMap<u16, [i16; 4]>>,
     // no_propagate_indices: Vec<bool>,
 }
 
@@ -26,81 +28,24 @@ impl Wave2 {
         rules: &Rules,
         // template_map: Option<(Vec<u16>, u16)>,
     ) -> Wave2 {
-        let mut cells = vec![HashMap::new(); (width * height) as usize];
-
         // initialize all cells in the map to be able to be every possible tile.
-        for y in 0..height {
-            for x in 0..width {
-                for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                    let target_x = x + direction.0;
-                    let target_y = y + direction.1;
+        let mut example_cell = HashMap::new();
 
-                    if target_x < 0 || target_x >= width || target_y < 0 || target_y >= height {
-                        continue;
-                    }
-
-                    let target_index = (target_x + target_y * width) as usize;
-                    let target_cell = &mut cells[target_index];
-
-                    for rule in &rules.ruleset[ordinal] {
-                        for allowed_tile in rule.1 {
-                            target_cell.entry(*allowed_tile).or_insert([0, 0, 0, 0])[ordinal] += 1;
-                        }
-                    }
+        for (ordinal, _) in DIRECTIONS.iter().enumerate() {
+            for rule in &rules.ruleset[ordinal] {
+                for allowed_tile in rule.1 {
+                    example_cell.entry(*allowed_tile).or_insert([0, 0, 0, 0])[ordinal] += 1;
                 }
             }
         }
 
-        let mut wave = Wave2 {
-            width: width as isize,
-            height: height as isize,
-            cells,
+        Wave2 {
+            width: width,
+            height: height,
+            cells: vec![HashMap::new(); (width * height) as usize],
             rules: Rc::new(rules.clone()),
-        };
-
-        // iterate through the whole map and remove tiles that don't have sufficient support to exist
-        for y in 0..height {
-            for x in 0..width {
-                let index = (x + y * width) as usize;
-
-                for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                    let source_x = x - direction.0;
-                    let source_y = y - direction.1;
-
-                    if source_x < 0 || source_x >= width || source_y < 0 || source_y >= height {
-                        continue;
-                    }
-
-                    let target_cell = &mut wave.cells[index];
-
-                    let mut to_remove = HashSet::new();
-                    for tile in &target_cell.keys().cloned().collect::<Vec<_>>() {
-                        if target_cell[tile][ordinal] <= 0 {
-                            to_remove.insert(*tile);
-                        }
-                    }
-                    // TODO maybe make it 'remove and propagate'?
-
-                    if wave.propagate(index, &to_remove) == false {
-                        panic!();
-                    }
-                }
-            }
+            example_cell: Rc::new(example_cell),
         }
-
-        // shrink it to save memory
-        for y in 0..height {
-            for x in 0..width {
-                let index = (x + y * width) as usize;
-                let source_cell = &mut wave.cells[index];
-
-                source_cell.shrink_to_fit();
-            }
-        }
-
-        wave.cells.shrink_to_fit();
-
-        wave
     }
 
     pub fn print_wave(&self) {
@@ -322,24 +267,22 @@ impl Wave2 {
             }
         }
 
-
-
         // remove added tiles without sufficient support
         loop {
             // info!("memes");
 
             // calculate support for all added tiles
             for (index, tile) in &tiles_added {
-            // info!("memes2: {}", tiles_added.len());
-            if self.cells[*index].contains_key(tile) {
+                // info!("memes2: {}", tiles_added.len());
+                if self.cells[*index].contains_key(tile) {
                     self.calculate_support_for_tile(*index, *tile);
                 }
             }
-            
+
             let mut was_removed = false;
             for (index, tile) in &tiles_added {
-            // info!("memes3");
-            for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                // info!("memes3");
+                for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
                     let target_x = *index as isize % self.width;
                     let target_y = *index as isize / self.width;
                     assert!(target_x >= 0 && target_x < self.width);
@@ -382,7 +325,17 @@ impl Wave2 {
         }
     }
 
-    pub fn propagate(&mut self, start: usize, to_remove: &HashSet<u16>) -> bool {
+    pub fn unpropagate_v2(&mut self, propagation_backups: &HashMap<(usize, u16), [i16; 4]>) {
+        for ((index, tile), pb) in propagation_backups {
+            self.cells[*index].insert(*tile, *pb);
+        }
+    }
+
+    pub fn propagate(
+        &mut self,
+        start: usize,
+        to_remove: &HashSet<u16>,
+    ) -> (Option<usize>, HashMap<(usize, u16), [i16; 4]>) {
         #[derive(Clone, Eq, PartialEq, Debug)]
         struct Node {
             target_index: usize,
@@ -414,6 +367,8 @@ impl Wave2 {
 
         let mut vec = Vec::<Node>::new();
 
+        let mut backup = HashMap::new();
+
         vec.push(Node {
             target_index: start,
             projected_possibilities: self.cells[start].len() as isize,
@@ -428,14 +383,18 @@ impl Wave2 {
 
             let mut removed = HashSet::new();
             for tile in chosen.to_remove {
-                if current_cell.remove(&tile).is_some() {
+                if let Some(support) = current_cell.remove(&tile) {
+                    if !backup.contains_key(&(current_index, tile)) {
+                        backup.insert((current_index, tile), support);
+                    }
+
                     removed.insert(tile);
                 }
             }
 
             if current_cell.len() == 0 {
                 // unsatisfiable.
-                return false;
+                return (Some(current_index), backup);
             }
 
             for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
@@ -464,6 +423,13 @@ impl Wave2 {
                             if let Some(target_tile_possibilities) =
                                 target_cell.get_mut(allowed_tile)
                             {
+                                if !backup.contains_key(&(target_index, *allowed_tile)) {
+                                    backup.insert(
+                                        (target_index, *allowed_tile),
+                                        *target_tile_possibilities,
+                                    );
+                                }
+
                                 target_tile_possibilities[ordinal] -= 1;
 
                                 if target_tile_possibilities[ordinal] <= 0 {
@@ -505,7 +471,7 @@ impl Wave2 {
         // info!("post-propagate");
         // self.print_wave();
 
-        true
+        (None, backup)
     }
 
     pub fn get_entropy_indices_in_order(
@@ -532,6 +498,38 @@ impl Wave2 {
         anyhow::Ok(entropies)
     }
 
+    // pub fn get_entropy_indices_in_order(
+    //     &self,
+    //     mut rng: &mut ThreadRng,
+    //     at_least: usize,
+    // ) -> Result<Vec<(usize, usize)>> {
+    //     // TODO: use real entropy instead of number of possibilities. Requires tile weights.
+    //     let mut entropies = self
+    //         .cells
+    //         .iter()
+    //         .map(|x| x.len())
+    //         .enumerate()
+    //         .filter(|&x| x.1 > 1)
+    //         .map(|z| {
+    //             let x = z.0 % self.width as usize;
+    //             let y = z.0 / self.width as usize;
+
+    //             let r = (f64::sqrt((x * x + y * y) as f64) * 1000.0) as usize;
+
+    //             (z.0, r)
+    //         })
+    //         .collect::<Vec<(usize, usize)>>();
+
+    //     anyhow::ensure!(entropies.len() >= 1);
+
+    //     entropies.shuffle(&mut rng);
+    //     entropies.sort_unstable_by_key(|x| x.1);
+
+    //     entropies.truncate(cmp::max(2, at_least));
+
+    //     anyhow::Ok(entropies)
+    // }
+
     pub fn choose_removal_set(&self, mut rng: &mut ThreadRng, index: usize) -> HashSet<u16> {
         if self.cells[index].len() <= 1 {
             panic!("can't collapse this one.");
@@ -544,42 +542,105 @@ impl Wave2 {
         all_tiles.into_iter().map(|x| x.0).cloned().collect()
     }
 
+    pub fn normalize_support(&mut self, x_min: isize, y_min: isize, x_max: isize, y_max: isize) {
+        // // iterate through the whole map and remove tiles that don't have sufficient support to exist
+        for y in y_min..=y_max {
+            for x in x_min..=x_max {
+                let index = (x + y * self.width) as usize;
+
+                for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                    let source_x = x - direction.0;
+                    let source_y = y - direction.1;
+
+                    if source_x < 0
+                        || source_x >= self.width
+                        || source_y < 0
+                        || source_y >= self.height
+                    {
+                        continue;
+                    }
+
+                    let target_cell = &mut self.cells[index];
+
+                    let mut to_remove = HashSet::new();
+                    for tile in &target_cell.keys().cloned().collect::<Vec<_>>() {
+                        if target_cell[tile][ordinal] <= 0 {
+                            to_remove.insert(*tile);
+                        }
+                    }
+
+                    if self.propagate(index, &to_remove).0.is_some() {
+                        panic!();
+                    }
+                }
+            }
+        }
+    }
+
     pub fn logical_conclusion<F: Fn(&Wave2)>(
-        &self,
+        &mut self,
         update: &F,
         update_interval: u32,
     ) -> Result<Wave2> {
+        update(&self);
+
+        // initialize all cells in the map to be able to be every possible tile.
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let target_index = (x + y * self.width) as usize;
+                self.cells[target_index] = (*self.example_cell).clone();
+            }
+        }
+
+        self.normalize_support(0, 0, self.width - 1, self.height - 1);
+
+        // // shrink it to save memory
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let index = (x + y * self.width) as usize;
+                let source_cell = &mut self.cells[index];
+
+                source_cell.shrink_to_fit();
+            }
+        }
+
+        self.cells.shrink_to_fit();
+
         let mut rng = rand::thread_rng();
 
-        let mut waves = LinkedList::new();
+        // let mut waves = LinkedList::new();
+        let mut propagation_backups = VecDeque::new();
         let mut indices = VecDeque::new();
 
         let mut current_wave = self.clone();
         let mut current_indices;
 
         let mut last_time = Instant::now();
-        update(&current_wave);
 
-        warn!("Initial Wave");
-        self.print_wave();
+        // warn!("Initial Wave");
+        // self.print_wave();
+
+        let mut failures = HashMap::new();
 
         current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
 
         loop {
-            while waves.len() > 20 {
+            while propagation_backups.len() > 100 {
                 // We're not going to go back 100 iterations, so, start dropping those ones so we don't run out of memory.
-                waves.pop_back();
+                // waves.pop_back();
                 indices.pop_back();
+                propagation_backups.pop_back();
             }
 
             let current_index = current_indices.pop();
 
             if current_index == None {
+                current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
                 current_indices = indices.pop_front().unwrap();
                 // unpropagate?
-                current_wave = waves.pop_front().unwrap();
+                //current_wave = waves.pop_front().unwrap();
                 // let propagation = waves.pop_front().unwrap();
-                warn!("backtrack");
+                // warn!("backtrack");
                 // self.unpropagate(waves.index, &propagation.to_remove);
                 continue;
             }
@@ -591,25 +652,75 @@ impl Wave2 {
                 update(&current_wave);
             }
 
-            let mut new_wave = current_wave.clone();
-            let to_remove = new_wave.choose_removal_set(&mut rng, index);
+            //let mut new_wave = current_wave.clone();
+            let to_remove = current_wave.choose_removal_set(&mut rng, index);
 
-            if !new_wave.propagate(index, &to_remove) {
+            let (failed_at, propagation_backup) = current_wave.propagate(index, &to_remove);
+
+            if let Some(failed_at) = failed_at {
                 // self.unpropagate(index, &to_remove);
+                current_wave.unpropagate_v2(&propagation_backup);
+
+                let failed_x = failed_at as isize % self.width;
+                let failed_y = failed_at as isize / self.width;
+
+                let failures_entry = failures.entry((failed_x, failed_y)).or_insert(0);
+
+                *failures_entry += 1;
+
+                if *failures_entry > 64 {
+                    error!("NUKE");
+                    failures.clear();
+                    const NUKE_RADIUS: isize = 5;
+
+                    // nuke area
+                    for dy in -NUKE_RADIUS..=NUKE_RADIUS {
+                        for dx in -NUKE_RADIUS..=NUKE_RADIUS {
+                            let nuke_x = failed_x + dx;
+                            let nuke_y = failed_y + dy;
+
+                            if nuke_x < 0
+                                || nuke_x >= self.width
+                                || nuke_y < 0
+                                || nuke_y >= self.height
+                            {
+                                continue;
+                            }
+
+                            let nuke_index = (nuke_x + nuke_y * self.width) as usize;
+
+                            current_wave.cells[nuke_index] = (*self.example_cell).clone();
+                        }
+                    }
+
+                    self.normalize_support(
+                        std::cmp::max(failed_x - (NUKE_RADIUS + 1), 0),
+                        std::cmp::max(failed_y - (NUKE_RADIUS + 1), 0),
+                        std::cmp::min(failed_x + (NUKE_RADIUS + 1), self.width - 1),
+                        std::cmp::min(failed_y + (NUKE_RADIUS + 1), self.height - 1),
+                    );
+
+                    propagation_backups.clear();
+                    indices.clear();
+
+                    current_indices =
+                        current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
+                }
+
                 continue;
             }
 
-            if new_wave.is_done() {
-                return anyhow::Ok(new_wave.clone());
+            if current_wave.is_done() {
+                return anyhow::Ok(current_wave.clone());
             }
 
+            propagation_backups.push_front(propagation_backup);
             // this would normally be a recursive call but I can't figure out how to increase the stack size in wasm.
-            waves.push_front(current_wave);
+            //waves.push_front(current_wave);
             // propagations.push_front(Propagation { index, to_remove });
             indices.push_front(current_indices);
-            current_wave = new_wave;
+            // current_wave = new_wave;
             current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 2)?;
-
         }
     }
 }
@@ -622,100 +733,155 @@ mod test {
     use quickcheck_macros::quickcheck;
     use test_log::test;
 
-    #[test]
-    fn asfdasfasd() {
-        #[rustfmt::skip]
-        let rules = Rules::new(2, 3, &vec![
-            1, 2, 
-            2, 1, 
-            1, 1], &HashSet::new(), 0);
-        let wave = Wave2::new(3, 1, &rules);
+    // #[test]
+    // fn asfdasfasd() {
+    //     #[rustfmt::skip]
+    //     let rules = Rules::new(2, 3, &vec![
+    //         1, 2,
+    //         2, 1,
+    //         1, 1], &HashSet::new(), 0);
+    //     let wave = Wave2::new(3, 1, &rules);
 
-        let mut to_remove = HashSet::new();
-        to_remove.insert(1);
+    //     let mut to_remove = HashSet::new();
+    //     to_remove.insert(1);
 
-        let mut wave1 = wave.clone();
-        wave1.propagate(0, &to_remove);
-        assert_ne!(wave.cells, wave1.cells);
-        wave1.unpropagate(0, &to_remove);
-        assert_eq!(wave.cells, wave1.cells);
-    }
+    //     let mut wave1 = wave.clone();
+    //     wave1.propagate(0, &to_remove);
+    //     assert_ne!(wave.cells, wave1.cells);
+    //     wave1.unpropagate(0, &to_remove);
+    //     assert_eq!(wave.cells, wave1.cells);
+    // }
 
-    #[test]
-    fn dasfasdf() {
-        #[rustfmt::skip]
-        let rules = Rules::new(2, 3, &vec![
-            1, 2, 
-            2, 1, 
-            1, 2], &HashSet::new(), 0);
-        let wave = Wave2::new(2, 2, &rules);
+    // #[test]
+    // fn dasfasdf() {
+    //     #[rustfmt::skip]
+    //     let rules = Rules::new(2, 3, &vec![
+    //         1, 2,
+    //         2, 1,
+    //         1, 2], &HashSet::new(), 0);
+    //     let wave = Wave2::new(2, 2, &rules);
 
-        let mut to_remove = HashSet::new();
-        to_remove.insert(1);
+    //     let mut to_remove = HashSet::new();
+    //     to_remove.insert(1);
 
-        let mut wave1 = wave.clone();
-        wave1.propagate(0, &to_remove);
-        assert_ne!(wave.cells, wave1.cells);
-        wave1.unpropagate(0, &to_remove);
-        assert_eq!(wave.cells, wave1.cells);
-    }
+    //     let mut wave1 = wave.clone();
+    //     wave1.propagate(0, &to_remove);
+    //     assert_ne!(wave.cells, wave1.cells);
+    //     wave1.unpropagate(0, &to_remove);
+    //     assert_eq!(wave.cells, wave1.cells);
+    // }
 
-    #[test]
-    fn dasfsdgagasdgasdf() {
-        #[rustfmt::skip]
-        let rules = Rules::new(2, 2, &vec![
-            0, 0,
-            1, 1], &HashSet::new(), 0);
-        let wave = Wave2::new(2, 2, &rules);
+    // #[test]
+    // fn dasfsdgagasdgasdf() {
+    //     #[rustfmt::skip]
+    //     let rules = Rules::new(2, 2, &vec![
+    //         0, 0,
+    //         1, 1], &HashSet::new(), 0);
+    //     let wave = Wave2::new(2, 2, &rules);
 
-        let mut to_remove = HashSet::new();
-        to_remove.insert(1);
+    //     let mut to_remove = HashSet::new();
+    //     to_remove.insert(1);
 
-        let mut wave1 = wave.clone();
-        wave1.propagate(2, &to_remove);
-        assert_ne!(wave.cells, wave1.cells);
-        wave1.unpropagate(2, &to_remove);
-        assert_eq!(wave.cells, wave1.cells);
-    }
+    //     let mut wave1 = wave.clone();
+    //     wave1.propagate(2, &to_remove);
+    //     assert_ne!(wave.cells, wave1.cells);
+    //     wave1.unpropagate(2, &to_remove);
+    //     assert_eq!(wave.cells, wave1.cells);
+    // }
 
-    #[test]
-    fn dfgsdfgsdfs() {
-        #[rustfmt::skip]
-        let rules = Rules::new(2, 2, &vec![
-            0, 1,
-            1, 1], &HashSet::new(), 0);
-        let wave = Wave2::new(2, 2, &rules);
+    // #[test]
+    // fn dfgsdfgsdfs() {
+    //     #[rustfmt::skip]
+    //     let rules = Rules::new(2, 2, &vec![
+    //         0, 1,
+    //         1, 1], &HashSet::new(), 0);
+    //     let wave = Wave2::new(2, 2, &rules);
 
-        let mut to_remove = HashSet::new();
-        to_remove.insert(1);
+    //     let mut to_remove = HashSet::new();
+    //     to_remove.insert(1);
 
-        let mut wave1 = wave.clone();
-        wave1.propagate(3, &to_remove);
-        assert_ne!(wave.cells, wave1.cells);
-        wave1.unpropagate(3, &to_remove);
-        assert_eq!(wave.cells, wave1.cells);
-    }
+    //     let mut wave1 = wave.clone();
+    //     wave1.propagate(3, &to_remove);
+    //     assert_ne!(wave.cells, wave1.cells);
+    //     wave1.unpropagate(3, &to_remove);
+    //     assert_eq!(wave.cells, wave1.cells);
+    // }
 
-    #[test]
-    fn sadafsag() {
-        #[rustfmt::skip]
-        let rules = Rules::new(3, 3, &vec![
-            0, 0, 0,
-            0, 2, 1,
-            0, 0, 0], &HashSet::new(), 0);
-        let wave = Wave2::new(3, 3, &rules);
+    // #[test]
+    // fn sadafsag() {
+    //     #[rustfmt::skip]
+    //     let rules = Rules::new(3, 3, &vec![
+    //         0, 0, 0,
+    //         0, 2, 1,
+    //         0, 0, 0], &HashSet::new(), 0);
+    //     let wave = Wave2::new(3, 3, &rules);
 
-        let mut to_remove = HashSet::new();
-        to_remove.insert(0);
+    //     let mut to_remove = HashSet::new();
+    //     to_remove.insert(0);
 
-        let mut wave1 = wave.clone();
-        wave1.propagate(7, &to_remove);
-        assert_ne!(wave.cells, wave1.cells);
-        wave1.unpropagate(7, &to_remove);
-        assert_eq!(wave.cells, wave1.cells);
-    }
+    //     let mut wave1 = wave.clone();
+    //     wave1.propagate(7, &to_remove);
+    //     assert_ne!(wave.cells, wave1.cells);
+    //     wave1.unpropagate(7, &to_remove);
+    //     assert_eq!(wave.cells, wave1.cells);
+    // }
 
-    const MAX_WAVE_DIMENSION: usize = 18;
+    // #[quickcheck]
+    // fn fasdfasdf(index: ArbitraryIndex) {
+    //     #[rustfmt::skip]
+    //     let rules = Rules::new(2, 3, &vec![
+    //         1, 2,
+    //         2, 1,
+    //         1, 2], &HashSet::new(), 0);
+    //     let wave = Wave2::new(
+    //         MAX_WAVE_DIMENSION as isize,
+    //         MAX_WAVE_DIMENSION as isize,
+    //         &rules,
+    //     );
+
+    //     let mut to_remove = HashSet::new();
+    //     to_remove.insert(*wave.cells[index.index].iter().next().unwrap().0);
+
+    //     let mut wave1 = wave.clone();
+    //     wave1.propagate(index.index, &to_remove);
+    //     assert_ne!(wave.cells, wave1.cells);
+    //     wave1.unpropagate(index.index, &to_remove);
+    //     assert_eq!(wave.cells, wave1.cells);
+    // }
+
+    // #[ignore]
+    // #[quickcheck]
+    // fn fasdfsadg(index: ArbitraryIndex, ruledata: Vec<u16>) -> TestResult {
+    //     if ruledata.len() < MAX_WAVE_DIMENSION * MAX_WAVE_DIMENSION {
+    //         return TestResult::discard();
+    //     }
+
+    //     let rules = Rules::new(
+    //         MAX_WAVE_DIMENSION as isize,
+    //         MAX_WAVE_DIMENSION as isize,
+    //         &ruledata,
+    //         &HashSet::new(),
+    //         0,
+    //     );
+    //     let wave = Wave2::new(
+    //         MAX_WAVE_DIMENSION as isize,
+    //         MAX_WAVE_DIMENSION as isize,
+    //         &rules,
+    //     );
+
+    //     let mut to_remove = HashSet::new();
+    //     to_remove.insert(*wave.cells[index.index].iter().next().unwrap().0);
+
+    //     let mut wave1 = wave.clone();
+    //     wave1.propagate(index.index, &to_remove);
+    //     assert_ne!(wave.cells, wave1.cells);
+    //     wave1.unpropagate(index.index, &to_remove);
+    //     assert_eq!(wave.cells, wave1.cells);
+
+    //     TestResult::passed()
+    // }
+
+    const MAX_WAVE_DIMENSION: usize = 3;
 
     #[derive(Debug, Clone)]
     struct ArbitraryIndex {
@@ -730,40 +896,28 @@ mod test {
         }
     }
 
-    #[quickcheck]
-    fn fasdfasdf(index: ArbitraryIndex) {
-        #[rustfmt::skip]
-        let rules = Rules::new(2, 3, &vec![
-            1, 2, 
-            2, 1, 
-            1, 2], &HashSet::new(), 0);
-        let wave = Wave2::new(
-            MAX_WAVE_DIMENSION as isize,
-            MAX_WAVE_DIMENSION as isize,
-            &rules,
-        );
-
-        let mut to_remove = HashSet::new();
-        to_remove.insert(*wave.cells[index.index].iter().next().unwrap().0);
-
-        let mut wave1 = wave.clone();
-        wave1.propagate(index.index, &to_remove);
-        assert_ne!(wave.cells, wave1.cells);
-        wave1.unpropagate(index.index, &to_remove);
-        assert_eq!(wave.cells, wave1.cells);
+    #[derive(Debug, Clone)]
+    struct ArbitraryRuleData {
+        ruledata: Vec<u16>,
     }
 
-    #[ignore]
-    #[quickcheck]
-    fn fasdfsadg(index: ArbitraryIndex, ruledata: Vec<u16>) -> TestResult {
-        if ruledata.len() < MAX_WAVE_DIMENSION * MAX_WAVE_DIMENSION {
-            return TestResult::discard();
-        }
+    impl Arbitrary for ArbitraryRuleData {
+        fn arbitrary(g: &mut Gen) -> ArbitraryRuleData {
+            let mut ruledata = vec![0u16; MAX_WAVE_DIMENSION * MAX_WAVE_DIMENSION];
+            for v in ruledata.iter_mut() {
+                *v = u16::arbitrary(g);
+            }
 
+            ArbitraryRuleData { ruledata: ruledata }
+        }
+    }
+
+    #[quickcheck]
+    fn sdfsadfddd(index: ArbitraryIndex, ruledata: ArbitraryRuleData) -> TestResult {
         let rules = Rules::new(
             MAX_WAVE_DIMENSION as isize,
             MAX_WAVE_DIMENSION as isize,
-            &ruledata,
+            &ruledata.ruledata,
             &HashSet::new(),
             0,
         );
@@ -777,9 +931,9 @@ mod test {
         to_remove.insert(*wave.cells[index.index].iter().next().unwrap().0);
 
         let mut wave1 = wave.clone();
-        wave1.propagate(index.index, &to_remove);
+        let (_, pb) = wave1.propagate(index.index, &to_remove);
         assert_ne!(wave.cells, wave1.cells);
-        wave1.unpropagate(index.index, &to_remove);
+        wave1.unpropagate_v2(&pb);
         assert_eq!(wave.cells, wave1.cells);
 
         TestResult::passed()
