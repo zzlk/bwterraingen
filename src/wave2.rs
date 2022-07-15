@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 pub struct Wave2 {
     pub width: isize,
     pub height: isize,
-    cells: Vec<HashMap<u16, [isize; 4]>>,
+    cells: Vec<HashMap<u16, [i16; 4]>>,
     rules: Rc<Rules>,
     // no_propagate_indices: Vec<bool>,
 }
@@ -88,8 +88,16 @@ impl Wave2 {
             }
         }
 
-        info!("finish constructor");
-        wave.print_wave();
+        // shrink it to save memory
+        for y in 0..height {
+            for x in 0..width {
+                let index = (x + y * width) as usize;
+                let source_cell = &mut wave.cells[index];
+
+                source_cell.shrink_to_fit();
+            }
+        }
+
         wave
     }
 
@@ -163,10 +171,10 @@ impl Wave2 {
             }
 
             for item in to_do {
-                debug!(
-                    "adding. start: {cell_index}, tile: {}, ordinal: {}",
-                    item.0, item.1
-                );
+                // debug!(
+                //     "adding. start: {cell_index}, tile: {}, ordinal: {}",
+                //     item.0, item.1
+                // );
                 if let Some(x) = self.cells[cell_index].get_mut(&item.0) {
                     x[item.1] += 1;
                 }
@@ -175,7 +183,7 @@ impl Wave2 {
     }
 
     pub fn unpropagate(&mut self, start: usize, tiles_removed: &HashSet<u16>) {
-        debug!("unpropagating");
+        // debug!("unpropagating");
         // self.print_wave();
         #[derive(Clone, Eq, PartialEq, Debug)]
         struct Node {
@@ -205,7 +213,7 @@ impl Wave2 {
         let mut tiles_added = HashSet::new();
 
         for tile in tiles_removed {
-            debug!("start: {start}, tile: {tile}");
+            // debug!("start: {start}, tile: {tile}");
             if self.cells[start].insert(*tile, [0, 0, 0, 0]).is_some() {
                 panic!();
             } else {
@@ -245,8 +253,8 @@ impl Wave2 {
 
                 let target_index = (target_x + target_y * self.width) as usize;
 
-                debug!("unpropagating. potentially incrementing counts. ordinal: {ordinal}, source: {source_x},{source_y}, target: {target_x},{target_y}");
-                debug!("cells before: {:?}", self.cells);
+                // debug!("unpropagating. potentially incrementing counts. ordinal: {ordinal}, source: {source_x},{source_y}, target: {target_x},{target_y}");
+                // debug!("cells before: {:?}", self.cells);
 
                 // update support for surrounding cells based on newly re-inserted tiles
                 let mut tiles_inserted = HashSet::new();
@@ -254,7 +262,7 @@ impl Wave2 {
                     if let Some(rule) = self.rules.ruleset[ordinal].get(inserted_tile) {
                         for allowed_tile in rule.clone() {
                             if !self.cells[target_index].contains_key(&allowed_tile) {
-                                debug!("inserting new tile");
+                                // debug!("inserting new tile");
                                 tiles_inserted.insert(allowed_tile);
 
                                 self.cells[target_index].insert(allowed_tile, [0, 0, 0, 0]);
@@ -263,7 +271,7 @@ impl Wave2 {
                                 // add in support from existing tiles
                                 // self.calculate_support_for_tile(target_index, allowed_tile);
                             } else {
-                                debug!("inserting new tile2");
+                                // debug!("inserting new tile2");
 
                                 self.cells[target_index].insert(allowed_tile, [0, 0, 0, 0]);
                                 tiles_added.insert((target_index, allowed_tile));
@@ -282,8 +290,8 @@ impl Wave2 {
                     }
                 }
 
-                debug!("cells after: {:?}", self.cells);
-                info!("meme");
+                // debug!("cells after: {:?}", self.cells);
+                // info!("meme");
 
                 if tiles_inserted.len() > 0 {
                     let mut was_found = false;
@@ -316,11 +324,11 @@ impl Wave2 {
 
         // remove added tiles without sufficient support
         loop {
-            info!("memes");
+            // info!("memes");
 
             // calculate support for all added tiles
             for (index, tile) in &tiles_added {
-            info!("memes2: {}", tiles_added.len());
+            // info!("memes2: {}", tiles_added.len());
             if self.cells[*index].contains_key(tile) {
                     self.calculate_support_for_tile(*index, *tile);
                 }
@@ -328,7 +336,7 @@ impl Wave2 {
             
             let mut was_removed = false;
             for (index, tile) in &tiles_added {
-            info!("memes3");
+            // info!("memes3");
             for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
                     let target_x = *index as isize % self.width;
                     let target_y = *index as isize / self.width;
@@ -535,34 +543,30 @@ impl Wave2 {
     }
 
     pub fn logical_conclusion<F: Fn(&Wave2)>(
-        &mut self,
+        &self,
         update: &F,
         update_interval: u32,
     ) -> Result<Wave2> {
-        struct Propagation {
-            index: usize,
-            to_remove: HashSet<u16>,
-        }
-
         let mut rng = rand::thread_rng();
 
-        let mut propagations: VecDeque<Propagation> = VecDeque::new();
+        let mut waves = VecDeque::new();
         let mut indices = VecDeque::new();
 
+        let mut current_wave = self.clone();
         let mut current_indices;
 
         let mut last_time = Instant::now();
-        update(&self);
+        update(&current_wave);
 
         warn!("Initial Wave");
         self.print_wave();
 
-        current_indices = self.get_entropy_indices_in_order(&mut rng, 100000)?;
+        current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
 
         loop {
-            while propagations.len() > 20 {
+            while waves.len() > 20 {
                 // We're not going to go back 100 iterations, so, start dropping those ones so we don't run out of memory.
-                propagations.pop_back();
+                waves.pop_back();
                 indices.pop_back();
             }
 
@@ -571,10 +575,10 @@ impl Wave2 {
             if current_index == None {
                 current_indices = indices.pop_front().unwrap();
                 // unpropagate?
-                // current_wave = waves.pop_front().unwrap();
-                let propagation = propagations.pop_front().unwrap();
+                current_wave = waves.pop_front().unwrap();
+                // let propagation = waves.pop_front().unwrap();
                 warn!("backtrack");
-                self.unpropagate(propagation.index, &propagation.to_remove);
+                // self.unpropagate(waves.index, &propagation.to_remove);
                 continue;
             }
 
@@ -582,25 +586,28 @@ impl Wave2 {
 
             if Instant::now().duration_since(last_time).as_millis() as u32 > update_interval {
                 last_time = Instant::now();
-                update(&self);
+                update(&current_wave);
             }
 
-            let to_remove = self.choose_removal_set(&mut rng, index);
+            let mut new_wave = current_wave.clone();
+            let to_remove = new_wave.choose_removal_set(&mut rng, index);
 
-            if !self.propagate(index, &to_remove) {
-                self.unpropagate(index, &to_remove);
+            if !new_wave.propagate(index, &to_remove) {
+                // self.unpropagate(index, &to_remove);
                 continue;
             }
 
-            if self.is_done() {
-                return anyhow::Ok(self.clone());
+            if new_wave.is_done() {
+                return anyhow::Ok(new_wave.clone());
             }
 
             // this would normally be a recursive call but I can't figure out how to increase the stack size in wasm.
-            // waves.push_front(current_wave);
-            propagations.push_front(Propagation { index, to_remove });
+            waves.push_front(current_wave);
+            // propagations.push_front(Propagation { index, to_remove });
             indices.push_front(current_indices);
-            current_indices = self.get_entropy_indices_in_order(&mut rng, 2)?;
+            current_wave = new_wave;
+            current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 2)?;
+
         }
     }
 }
