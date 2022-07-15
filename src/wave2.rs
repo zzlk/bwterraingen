@@ -6,7 +6,7 @@ use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::{self, Ordering};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque, LinkedList};
 use std::rc::Rc;
 use tracing::{debug, error, info, warn};
 
@@ -97,6 +97,8 @@ impl Wave2 {
                 source_cell.shrink_to_fit();
             }
         }
+
+        wave.cells.shrink_to_fit();
 
         wave
     }
@@ -549,7 +551,7 @@ impl Wave2 {
     ) -> Result<Wave2> {
         let mut rng = rand::thread_rng();
 
-        let mut waves = VecDeque::new();
+        let mut waves = LinkedList::new();
         let mut indices = VecDeque::new();
 
         let mut current_wave = self.clone();
