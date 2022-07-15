@@ -7,7 +7,7 @@ use tracing::info;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Rules {
-    pub(crate) ruleset: [HashMap<u16, HashSet<u16>>; 4],
+    pub ruleset: [HashMap<u16, HashSet<u16>>; 4],
     pub era: u16,
 }
 
