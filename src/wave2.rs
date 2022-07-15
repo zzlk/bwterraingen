@@ -581,6 +581,7 @@ impl Wave2 {
         &mut self,
         update: &F,
         update_interval: u32,
+        nuke_radius: isize,
     ) -> Result<Wave2> {
         update(&self);
 
@@ -671,11 +672,10 @@ impl Wave2 {
                 if *failures_entry > 64 {
                     error!("NUKE");
                     failures.clear();
-                    const NUKE_RADIUS: isize = 5;
 
                     // nuke area
-                    for dy in -NUKE_RADIUS..=NUKE_RADIUS {
-                        for dx in -NUKE_RADIUS..=NUKE_RADIUS {
+                    for dy in -nuke_radius..=nuke_radius {
+                        for dx in -nuke_radius..=nuke_radius {
                             let nuke_x = failed_x + dx;
                             let nuke_y = failed_y + dy;
 
@@ -694,10 +694,10 @@ impl Wave2 {
                     }
 
                     self.normalize_support(
-                        std::cmp::max(failed_x - (NUKE_RADIUS + 1), 0),
-                        std::cmp::max(failed_y - (NUKE_RADIUS + 1), 0),
-                        std::cmp::min(failed_x + (NUKE_RADIUS + 1), self.width - 1),
-                        std::cmp::min(failed_y + (NUKE_RADIUS + 1), self.height - 1),
+                        std::cmp::max(failed_x - (nuke_radius + 1), 0),
+                        std::cmp::max(failed_y - (nuke_radius + 1), 0),
+                        std::cmp::min(failed_x + (nuke_radius + 1), self.width - 1),
+                        std::cmp::min(failed_y + (nuke_radius + 1), self.height - 1),
                     );
 
                     propagation_backups.clear();
