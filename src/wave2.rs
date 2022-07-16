@@ -561,8 +561,8 @@ impl Wave2 {
                         continue;
                     }
 
-                    for tile in self.cells[index].keys() {
-                        if self.cells[index][tile][ordinal] <= 0 {
+                    for (tile, support) in &self.cells[index] {
+                        if support[ordinal] <= 0 {
                             to_remove.insert(*tile);
                         }
                     }
