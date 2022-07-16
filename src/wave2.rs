@@ -548,6 +548,7 @@ impl Wave2 {
             for x in x_min..=x_max {
                 let index = (x + y * self.width) as usize;
 
+                let mut to_remove = HashSet::new();
                 for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
                     let source_x = x - direction.0;
                     let source_y = y - direction.1;
@@ -560,18 +561,15 @@ impl Wave2 {
                         continue;
                     }
 
-                    let target_cell = &mut self.cells[index];
-
-                    let mut to_remove = HashSet::new();
-                    for tile in &target_cell.keys().cloned().collect::<Vec<_>>() {
-                        if target_cell[tile][ordinal] <= 0 {
+                    for tile in self.cells[index].keys() {
+                        if self.cells[index][tile][ordinal] <= 0 {
                             to_remove.insert(*tile);
                         }
                     }
+                }
 
-                    if self.propagate(index, &to_remove).0.is_some() {
-                        panic!();
-                    }
+                if self.propagate(index, &to_remove).0.is_some() {
+                    panic!();
                 }
             }
         }
@@ -624,6 +622,9 @@ impl Wave2 {
         let mut failures = HashMap::new();
 
         current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
+
+        // info!("start main loop");
+        // return anyhow::Ok(self.clone());
 
         loop {
             while propagation_backups.len() > 100 {
