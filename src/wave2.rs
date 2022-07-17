@@ -549,19 +549,19 @@ impl Wave2 {
                 let index = (x + y * self.width) as usize;
 
                 let mut to_remove = HashSet::new();
-                for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                    let source_x = x - direction.0;
-                    let source_y = y - direction.1;
+                for (tile, support) in &self.cells[index] {
+                    for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                        let source_x = x - direction.0;
+                        let source_y = y - direction.1;
 
-                    if source_x < 0
-                        || source_x >= self.width
-                        || source_y < 0
-                        || source_y >= self.height
-                    {
-                        continue;
-                    }
+                        if source_x < 0
+                            || source_x >= self.width
+                            || source_y < 0
+                            || source_y >= self.height
+                        {
+                            continue;
+                        }
 
-                    for (tile, support) in &self.cells[index] {
                         if support[ordinal] <= 0 {
                             to_remove.insert(*tile);
                         }
