@@ -129,201 +129,201 @@ impl Wave2 {
         }
     }
 
-    pub fn unpropagate(&mut self, start: usize, tiles_removed: &HashSet<u16>) {
-        // debug!("unpropagating");
-        // self.print_wave();
-        #[derive(Clone, Eq, PartialEq, Debug)]
-        struct Node {
-            target_index: usize,
-            projected_possibilities: isize,
-            tiles_inserted: HashSet<u16>,
-        }
+    // pub fn unpropagate(&mut self, start: usize, tiles_removed: &HashSet<u16>) {
+    //     // debug!("unpropagating");
+    //     // self.print_wave();
+    //     #[derive(Clone, Eq, PartialEq, Debug)]
+    //     struct Node {
+    //         target_index: usize,
+    //         projected_possibilities: isize,
+    //         tiles_inserted: HashSet<u16>,
+    //     }
 
-        impl Ord for Node {
-            fn cmp(&self, other: &Self) -> Ordering {
-                // Notice that the we flip the ordering on costs.
-                // In case of a tie we compare positions - this step is necessary
-                // to make implementations of `PartialEq` and `Ord` consistent.
-                other
-                    .projected_possibilities
-                    .cmp(&self.projected_possibilities)
-            }
-        }
+    //     impl Ord for Node {
+    //         fn cmp(&self, other: &Self) -> Ordering {
+    //             // Notice that the we flip the ordering on costs.
+    //             // In case of a tie we compare positions - this step is necessary
+    //             // to make implementations of `PartialEq` and `Ord` consistent.
+    //             other
+    //                 .projected_possibilities
+    //                 .cmp(&self.projected_possibilities)
+    //         }
+    //     }
 
-        // `PartialOrd` needs to be implemented as well.
-        impl PartialOrd for Node {
-            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                Some(self.cmp(other))
-            }
-        }
+    //     // `PartialOrd` needs to be implemented as well.
+    //     impl PartialOrd for Node {
+    //         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    //             Some(self.cmp(other))
+    //         }
+    //     }
 
-        let mut tiles_added = HashSet::new();
+    //     let mut tiles_added = HashSet::new();
 
-        for tile in tiles_removed {
-            // debug!("start: {start}, tile: {tile}");
-            if self.cells[start].insert(*tile, [0, 0, 0, 0]).is_some() {
-                panic!();
-            } else {
-                tiles_added.insert((start, *tile));
-                // self.calculate_support_for_tile(start, *tile);
-            }
-        }
+    //     for tile in tiles_removed {
+    //         // debug!("start: {start}, tile: {tile}");
+    //         if self.cells[start].insert(*tile, [0, 0, 0, 0]).is_some() {
+    //             panic!();
+    //         } else {
+    //             tiles_added.insert((start, *tile));
+    //             // self.calculate_support_for_tile(start, *tile);
+    //         }
+    //     }
 
-        let mut vec = Vec::<Node>::new();
-        vec.push(Node {
-            target_index: start,
-            projected_possibilities: self.cells[start].len() as isize,
-            tiles_inserted: tiles_removed.clone(),
-        });
+    //     let mut vec = Vec::<Node>::new();
+    //     vec.push(Node {
+    //         target_index: start,
+    //         projected_possibilities: self.cells[start].len() as isize,
+    //         tiles_inserted: tiles_removed.clone(),
+    //     });
 
-        while vec.len() > 0 {
-            // self.print_wave();
-            // info!("propagate step");
-            let chosen = vec.pop().unwrap();
-            let current_index = chosen.target_index;
+    //     while vec.len() > 0 {
+    //         // self.print_wave();
+    //         // info!("propagate step");
+    //         let chosen = vec.pop().unwrap();
+    //         let current_index = chosen.target_index;
 
-            for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                let (source_x, source_y) = (
-                    current_index as isize % self.width,
-                    current_index as isize / self.width,
-                );
-                assert!(source_x >= 0 && source_x < self.width);
-                assert!(source_y >= 0 && source_y < self.height);
+    //         for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+    //             let (source_x, source_y) = (
+    //                 current_index as isize % self.width,
+    //                 current_index as isize / self.width,
+    //             );
+    //             assert!(source_x >= 0 && source_x < self.width);
+    //             assert!(source_y >= 0 && source_y < self.height);
 
-                let target_x = source_x + direction.0;
-                let target_y = source_y + direction.1;
+    //             let target_x = source_x + direction.0;
+    //             let target_y = source_y + direction.1;
 
-                if target_x < 0 || target_x >= self.width || target_y < 0 || target_y >= self.height
-                {
-                    continue;
-                }
+    //             if target_x < 0 || target_x >= self.width || target_y < 0 || target_y >= self.height
+    //             {
+    //                 continue;
+    //             }
 
-                let target_index = (target_x + target_y * self.width) as usize;
+    //             let target_index = (target_x + target_y * self.width) as usize;
 
-                // debug!("unpropagating. potentially incrementing counts. ordinal: {ordinal}, source: {source_x},{source_y}, target: {target_x},{target_y}");
-                // debug!("cells before: {:?}", self.cells);
+    //             // debug!("unpropagating. potentially incrementing counts. ordinal: {ordinal}, source: {source_x},{source_y}, target: {target_x},{target_y}");
+    //             // debug!("cells before: {:?}", self.cells);
 
-                // update support for surrounding cells based on newly re-inserted tiles
-                let mut tiles_inserted = HashSet::new();
-                for inserted_tile in &chosen.tiles_inserted {
-                    if let Some(rule) = self.rules.ruleset[ordinal].get(inserted_tile) {
-                        for allowed_tile in rule.clone() {
-                            if !self.cells[target_index].contains_key(&allowed_tile) {
-                                // debug!("inserting new tile");
-                                tiles_inserted.insert(allowed_tile);
+    //             // update support for surrounding cells based on newly re-inserted tiles
+    //             let mut tiles_inserted = HashSet::new();
+    //             for inserted_tile in &chosen.tiles_inserted {
+    //                 if let Some(rule) = self.rules.ruleset[ordinal].get(inserted_tile) {
+    //                     for allowed_tile in rule.clone() {
+    //                         if !self.cells[target_index].contains_key(&allowed_tile) {
+    //                             // debug!("inserting new tile");
+    //                             tiles_inserted.insert(allowed_tile);
 
-                                self.cells[target_index].insert(allowed_tile, [0, 0, 0, 0]);
-                                tiles_added.insert((target_index, allowed_tile));
+    //                             self.cells[target_index].insert(allowed_tile, [0, 0, 0, 0]);
+    //                             tiles_added.insert((target_index, allowed_tile));
 
-                                // add in support from existing tiles
-                                // self.calculate_support_for_tile(target_index, allowed_tile);
-                            } else {
-                                // debug!("inserting new tile2");
+    //                             // add in support from existing tiles
+    //                             // self.calculate_support_for_tile(target_index, allowed_tile);
+    //                         } else {
+    //                             // debug!("inserting new tile2");
 
-                                self.cells[target_index].insert(allowed_tile, [0, 0, 0, 0]);
-                                tiles_added.insert((target_index, allowed_tile));
+    //                             self.cells[target_index].insert(allowed_tile, [0, 0, 0, 0]);
+    //                             tiles_added.insert((target_index, allowed_tile));
 
-                                // add in support from existing tiles
-                                // self.calculate_support_for_tile(target_index, allowed_tile);
-                                // let target_tile_possibilities =
-                                //     self.cells[target_index].get_mut(&allowed_tile).unwrap();
+    //                             // add in support from existing tiles
+    //                             // self.calculate_support_for_tile(target_index, allowed_tile);
+    //                             // let target_tile_possibilities =
+    //                             //     self.cells[target_index].get_mut(&allowed_tile).unwrap();
 
-                                // debug!(
-                                //     "    unpropagating. incrementing. allowed_tile: {allowed_tile}"
-                                // );
-                                // target_tile_possibilities[ordinal] += 1;
-                            }
-                        }
-                    }
-                }
+    //                             // debug!(
+    //                             //     "    unpropagating. incrementing. allowed_tile: {allowed_tile}"
+    //                             // );
+    //                             // target_tile_possibilities[ordinal] += 1;
+    //                         }
+    //                     }
+    //                 }
+    //             }
 
-                // debug!("cells after: {:?}", self.cells);
-                // info!("meme");
+    //             // debug!("cells after: {:?}", self.cells);
+    //             // info!("meme");
 
-                if tiles_inserted.len() > 0 {
-                    let mut was_found = false;
-                    for i in &mut vec {
-                        if i.target_index == target_index {
-                            i.tiles_inserted.extend(tiles_inserted.clone());
-                            i.projected_possibilities =
-                                (self.cells[target_index].len() + i.tiles_inserted.len()) as isize;
-                            was_found = true;
-                            break;
-                        }
-                    }
+    //             if tiles_inserted.len() > 0 {
+    //                 let mut was_found = false;
+    //                 for i in &mut vec {
+    //                     if i.target_index == target_index {
+    //                         i.tiles_inserted.extend(tiles_inserted.clone());
+    //                         i.projected_possibilities =
+    //                             (self.cells[target_index].len() + i.tiles_inserted.len()) as isize;
+    //                         was_found = true;
+    //                         break;
+    //                     }
+    //                 }
 
-                    if !was_found {
-                        vec.push(Node {
-                            target_index,
-                            projected_possibilities: (self.cells[target_index].len()
-                                + tiles_inserted.len())
-                                as isize,
-                            tiles_inserted,
-                        });
-                    }
+    //                 if !was_found {
+    //                     vec.push(Node {
+    //                         target_index,
+    //                         projected_possibilities: (self.cells[target_index].len()
+    //                             + tiles_inserted.len())
+    //                             as isize,
+    //                         tiles_inserted,
+    //                     });
+    //                 }
 
-                    vec.sort_by(|a, b| b.projected_possibilities.cmp(&a.projected_possibilities));
-                }
-            }
-        }
+    //                 vec.sort_by(|a, b| b.projected_possibilities.cmp(&a.projected_possibilities));
+    //             }
+    //         }
+    //     }
 
-        // remove added tiles without sufficient support
-        loop {
-            // info!("memes");
+    //     // remove added tiles without sufficient support
+    //     loop {
+    //         // info!("memes");
 
-            // calculate support for all added tiles
-            for (index, tile) in &tiles_added {
-                // info!("memes2: {}", tiles_added.len());
-                if self.cells[*index].contains_key(tile) {
-                    self.calculate_support_for_tile(*index, *tile);
-                }
-            }
+    //         // calculate support for all added tiles
+    //         for (index, tile) in &tiles_added {
+    //             // info!("memes2: {}", tiles_added.len());
+    //             if self.cells[*index].contains_key(tile) {
+    //                 self.calculate_support_for_tile(*index, *tile);
+    //             }
+    //         }
 
-            let mut was_removed = false;
-            for (index, tile) in &tiles_added {
-                // info!("memes3");
-                for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                    let target_x = *index as isize % self.width;
-                    let target_y = *index as isize / self.width;
-                    assert!(target_x >= 0 && target_x < self.width);
-                    assert!(target_y >= 0 && target_y < self.height);
+    //         let mut was_removed = false;
+    //         for (index, tile) in &tiles_added {
+    //             // info!("memes3");
+    //             for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+    //                 let target_x = *index as isize % self.width;
+    //                 let target_y = *index as isize / self.width;
+    //                 assert!(target_x >= 0 && target_x < self.width);
+    //                 assert!(target_y >= 0 && target_y < self.height);
 
-                    let source_x = target_x - direction.0;
-                    let source_y = target_y - direction.1;
+    //                 let source_x = target_x - direction.0;
+    //                 let source_y = target_y - direction.1;
 
-                    if source_x < 0
-                        || source_x >= self.width
-                        || source_y < 0
-                        || source_y >= self.height
-                    {
-                        continue;
-                    }
+    //                 if source_x < 0
+    //                     || source_x >= self.width
+    //                     || source_y < 0
+    //                     || source_y >= self.height
+    //                 {
+    //                     continue;
+    //                 }
 
-                    // let source_index = (source_x + source_y * self.width) as usize;
+    //                 // let source_index = (source_x + source_y * self.width) as usize;
 
-                    let mut has_zero_support = true;
+    //                 let mut has_zero_support = true;
 
-                    if let Some(cell) = self.cells[*index].get(tile) {
-                        has_zero_support = has_zero_support && cell[ordinal] == 0;
-                    } else {
-                        has_zero_support = true;
-                    }
+    //                 if let Some(cell) = self.cells[*index].get(tile) {
+    //                     has_zero_support = has_zero_support && cell[ordinal] == 0;
+    //                 } else {
+    //                     has_zero_support = true;
+    //                 }
 
-                    if has_zero_support {
-                        if self.cells[*index].remove(tile).is_some() {
-                            was_removed = true;
-                        }
-                    }
-                }
-            }
+    //                 if has_zero_support {
+    //                     if self.cells[*index].remove(tile).is_some() {
+    //                         was_removed = true;
+    //                     }
+    //                 }
+    //             }
+    //         }
 
-            if was_removed {
-                continue;
-            }
+    //         if was_removed {
+    //             continue;
+    //         }
 
-            break;
-        }
-    }
+    //         break;
+    //     }
+    // }
 
     pub fn unpropagate_v2(&mut self, propagation_backups: &HashMap<(usize, u16), [i16; 4]>) {
         for ((index, tile), pb) in propagation_backups {
@@ -365,19 +365,19 @@ impl Wave2 {
             assert!(self.cells[start].contains_key(tile));
         }
 
-        let mut vec = Vec::<Node>::new();
+        let mut pq = Vec::<Node>::new();
 
         let mut backup = HashMap::new();
 
-        vec.push(Node {
+        pq.push(Node {
             target_index: start,
             projected_possibilities: self.cells[start].len() as isize,
             to_remove: to_remove.clone(),
         });
 
-        while vec.len() > 0 {
+        while pq.len() > 0 {
             // info!("propagate step");
-            let chosen = vec.pop().unwrap();
+            let chosen = pq.pop().unwrap();
             let current_index = chosen.target_index;
             let current_cell = &mut self.cells[current_index];
 
@@ -444,7 +444,7 @@ impl Wave2 {
 
                 if tiles_to_remove.len() > 0 {
                     let mut was_found = false;
-                    for i in &mut vec {
+                    for i in &mut pq {
                         if i.target_index == target_index {
                             i.to_remove.extend(tiles_to_remove.clone());
                             i.projected_possibilities =
@@ -455,7 +455,7 @@ impl Wave2 {
                     }
 
                     if !was_found {
-                        vec.push(Node {
+                        pq.push(Node {
                             target_index,
                             projected_possibilities: (target_cell.len() - tiles_to_remove.len())
                                 as isize,
@@ -463,7 +463,7 @@ impl Wave2 {
                         });
                     }
 
-                    vec.sort_by(|a, b| b.projected_possibilities.cmp(&a.projected_possibilities));
+                    pq.sort_by(|a, b| b.projected_possibilities.cmp(&a.projected_possibilities));
                 }
             }
         }
@@ -571,6 +571,8 @@ impl Wave2 {
                 if self.propagate(index, &to_remove).0.is_some() {
                     panic!();
                 }
+
+                self.print_wave();
             }
         }
     }
@@ -616,8 +618,8 @@ impl Wave2 {
 
         let mut last_time = Instant::now();
 
-        // warn!("Initial Wave");
-        // self.print_wave();
+        warn!("Initial Wave");
+        self.print_wave();
 
         let mut failures = HashMap::new();
 
