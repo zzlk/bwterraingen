@@ -1,5 +1,5 @@
 use crate::{bitset::BitSet, rules::Rules};
-use crate::{DIRECTIONS, N};
+use crate::{DIRECTIONS, MAX_TILE_BITS};
 use anyhow::Result;
 use cached::proc_macro::cached;
 use instant::Instant;
@@ -15,8 +15,8 @@ use tracing::{error, info, warn};
 pub struct Wave {
     pub width: isize,
     pub height: isize,
-    array: Vec<BitSet<N>>,
-    rules: Rc<[HashMap<usize, BitSet<N>>; 4]>,
+    array: Vec<BitSet<MAX_TILE_BITS>>,
+    rules: Rc<[HashMap<usize, BitSet<MAX_TILE_BITS>>; 4]>,
     inverse_mapping: Rc<HashMap<usize, u16>>,
     no_propagate_indices: Vec<bool>,
 }
@@ -55,17 +55,17 @@ pub struct Wave {
 // }
 
 #[cached(
-    key = "(BitSet<N>, usize, usize, usize)",
+    key = "(BitSet<MAX_TILE_BITS>, usize, usize, usize)",
     convert = r#"{ (*bitset, ordinal, upper, lower) }"#,
     size = 10000000
 )]
 fn get_allowed_rules_sub(
-    bitset: &BitSet<N>,
+    bitset: &BitSet<MAX_TILE_BITS>,
     ordinal: usize,
     upper: usize,
     lower: usize,
-    rules: &[HashMap<usize, BitSet<N>>; 4],
-) -> BitSet<N> {
+    rules: &[HashMap<usize, BitSet<MAX_TILE_BITS>>; 4],
+) -> BitSet<MAX_TILE_BITS> {
     let mut allowed = BitSet::new();
 
     for x in bitset
@@ -84,18 +84,18 @@ fn get_allowed_rules_sub(
 //     size = 1000000
 // )]
 fn get_allowed_rules(
-    bitset: &BitSet<N>,
+    bitset: &BitSet<MAX_TILE_BITS>,
     ordinal: usize,
-    rules: &[HashMap<usize, BitSet<N>>; 4],
-) -> BitSet<N> {
+    rules: &[HashMap<usize, BitSet<MAX_TILE_BITS>>; 4],
+) -> BitSet<MAX_TILE_BITS> {
     // trace!("get_allowed_rules. ordinal: {ordinal}");
 
-    let mut bs = BitSet::<N>::new();
+    let mut bs = BitSet::<MAX_TILE_BITS>::new();
 
     const FRACT: usize = 16;
     for i in 0..FRACT {
-        let start = i * (N / FRACT * std::mem::size_of::<usize>() * 8);
-        let end = (i + 1) * (N / FRACT * std::mem::size_of::<usize>() * 8);
+        let start = i * (MAX_TILE_BITS / FRACT * std::mem::size_of::<usize>() * 8);
+        let end = (i + 1) * (MAX_TILE_BITS / FRACT * std::mem::size_of::<usize>() * 8);
         let slice = bitset.slice(start, end);
 
         bs.union(&get_allowed_rules_sub(&slice, ordinal, end, start, rules));
@@ -113,7 +113,7 @@ impl Wave {
         template_map_mask_tile: u16,
     ) -> Wave {
         // remap rules so they are not sparse
-        let mut all_tiles = BitSet::<N>::new();
+        let mut all_tiles = BitSet::<MAX_TILE_BITS>::new();
         let mut mapping = HashMap::new();
         let mut inverse_mapping = HashMap::new();
 
@@ -144,7 +144,7 @@ impl Wave {
 
             let mut rule = HashMap::new(); // HashMap<usize, BitSet<N>>
             for (tile, allowed_tiles) in old_rule {
-                let mut allowed_tiles_remapped = BitSet::<N>::new();
+                let mut allowed_tiles_remapped = BitSet::<MAX_TILE_BITS>::new();
                 for allowed_tile in allowed_tiles {
                     all_tiles.set(mapping[allowed_tile]);
                     allowed_tiles_remapped.set(mapping[allowed_tile]);
@@ -169,7 +169,7 @@ impl Wave {
                 }
 
                 if tile != template_map_mask_tile {
-                    let mut bs = BitSet::<N>::new();
+                    let mut bs = BitSet::<MAX_TILE_BITS>::new();
                     bs.set(mapping[&tile]);
                     map[index] = bs;
                     no_propagate_indices[index] = true;
