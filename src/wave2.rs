@@ -1,5 +1,6 @@
+use crate::bitset::BitSet;
 use crate::rules::Rules;
-use crate::{DIRECTIONS, MAX_TILE_IDS};
+use crate::{DIRECTIONS, MAX_TILE_BITS, MAX_TILE_IDS};
 use anyhow::Result;
 use cached::proc_macro::cached;
 use cached::CachedAsync;
@@ -111,10 +112,6 @@ pub struct Wave2 {
     rules: Rc<FlatRules>,
     example_cell: Rc<Cell>,
     inverse_mapping: Rc<HashMap<u16, u16>>,
-    cache_src: [HashSet<u16>; 4],
-    cache: [HashMap<u16, i16>; 4],
-    operations: usize,
-    // no_propagate_indices: Vec<bool>,
 }
 
 impl Wave2 {
@@ -142,6 +139,16 @@ impl Wave2 {
                     if !mapping.contains_key(&tile) {
                         inverse_mapping.insert(mapping.len() as u16, tile);
                         mapping.insert(tile, mapping.len() as u16);
+                    }
+                }
+            }
+
+            // add tiles from template map
+            if let Some((template_map, _mask_tile)) = &template_map_and_mask_tile {
+                for tile in template_map {
+                    if !mapping.contains_key(&tile) {
+                        inverse_mapping.insert(mapping.len() as u16, *tile);
+                        mapping.insert(*tile, mapping.len() as u16);
                     }
                 }
             }
@@ -207,20 +214,7 @@ impl Wave2 {
             cells: vec![example_cell.clone(); (width * height) as usize], //Vec::with_capacity((width * height) as usize),
             rules: Rc::new(rules),
             example_cell: Rc::new(example_cell),
-            cache_src: [
-                HashSet::new(),
-                HashSet::new(),
-                HashSet::new(),
-                HashSet::new(),
-            ],
-            cache: [
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-                HashMap::new(),
-            ],
             inverse_mapping: Rc::new(inverse_mapping),
-            operations: 0,
         };
 
         // set tiles to tiles from template map and calculate support
@@ -279,6 +273,23 @@ impl Wave2 {
         //         }
         //     }
         // }
+
+        if let Some((template_map, mask_tile)) = &template_map_and_mask_tile {
+            for y in 0..height {
+                for x in 0..width {
+                    let index = (x + y * width) as usize;
+
+                    if template_map[index] != *mask_tile {
+                        let mut to_remove: HashSet<_> =
+                            wave.inverse_mapping.keys().cloned().collect();
+
+                        assert!(to_remove.remove(&mapping[&template_map[index]]));
+
+                        wave.propagate_remove(index, &to_remove);
+                    }
+                }
+            }
+        }
 
         // remove tiles with insufficient support
         loop {
@@ -761,18 +772,12 @@ impl Wave2 {
         #[derive(Clone, Eq, PartialEq, Debug)]
         struct Node {
             target_index: usize,
-            projected_possibilities: isize,
-            removed: HashSet<u16>,
+            removed: BitSet<MAX_TILE_BITS>,
         }
 
         impl Ord for Node {
             fn cmp(&self, other: &Self) -> Ordering {
-                // Notice that the we flip the ordering on costs.
-                // In case of a tie we compare positions - this step is necessary
-                // to make implementations of `PartialEq` and `Ord` consistent.
-                other
-                    .projected_possibilities
-                    .cmp(&self.projected_possibilities)
+                self.target_index.cmp(&other.target_index)
             }
         }
 
@@ -783,17 +788,13 @@ impl Wave2 {
             }
         }
 
-        for tile in to_remove {
-            assert!(self.cells[start].get(*tile as usize).is_some());
-        }
-
         let rules = self.rules.clone();
 
         let mut pq = Vec::<Node>::new();
 
-        let mut backup = HashMap::new();
+        let mut backup = HashMap::with_capacity(to_remove.len() * 10);
 
-        let mut removed = HashSet::new();
+        let mut removed = BitSet::new();
         for tile in to_remove {
             if self.cells[start].get(*tile as usize).is_some() {
                 if !backup.contains_key(&(start, *tile)) {
@@ -803,13 +804,12 @@ impl Wave2 {
                     );
                 }
                 self.cells[start].remove(*tile as usize);
-                removed.insert(*tile);
+                removed.set(*tile as usize);
             }
         }
 
         pq.push(Node {
             target_index: start,
-            projected_possibilities: self.cells[start].cached_len as isize,
             removed: removed.clone(),
         });
 
@@ -888,56 +888,66 @@ impl Wave2 {
                 // }
 
                 // panic!();
-                let mut target_tiles = [Option::<i16>::None; MAX_TILE_IDS];
-                for removed_tile in &chosen.removed {
-                    if let Some(rule) = &rules.ruleset[ordinal][*removed_tile as usize] {
-                        for allowed_tile in rule {
-                            self.operations += 1;
+                // let mut target_tiles = [Option::<i16>::None; MAX_TILE_IDS];
+                // for removed_tile in &chosen.removed {
+                //     if let Some(rule) = &rules.ruleset[ordinal][*removed_tile as usize] {
+                //         for allowed_tile in rule {
+                //             self.operations += 1;
 
-                            let target = &mut target_tiles[*allowed_tile as usize];
+                //             let target = &mut target_tiles[*allowed_tile as usize];
 
-                            if target.is_none() {
-                                *target = Some(0i16);
-                            }
-                            *target.as_mut().unwrap() += 1i16;
-                        }
-                    }
-                }
+                //             if target.is_none() {
+                //                 *target = Some(0i16);
+                //             }
+                //             *target.as_mut().unwrap() += 1i16;
+                //         }
+                //     }
+                // }
 
                 // debug!("target_tiles: {:?}", target_tiles);
 
-                let mut newly_removed_tiles = HashSet::new();
-                for (target_tile, delta) in target_tiles
-                    .as_ref()
-                    .iter()
-                    .enumerate()
-                    .filter_map(|x| x.1.as_ref().map(|y| (x.0 as u16, y)))
-                {
-                    if let Some(support) = target_cell.get_mut(target_tile as usize).as_mut() {
-                        if !backup.contains_key(&(target_index, target_tile)) {
-                            backup.insert((target_index, target_tile), *support);
-                        }
+                let mut newly_removed_tiles = BitSet::new();
+                // for (target_tile, delta) in target_tiles
+                //     .as_ref()
+                //     .iter()
+                //     .enumerate()
+                //     .filter_map(|x| x.1.as_ref().map(|y| (x.0 as u16, y)))
+                for removed_tile in &chosen.removed {
+                    if let Some(rule) = &rules.ruleset[ordinal][removed_tile] {
+                        for allowed_tile in rule {
+                            if let Some(support) =
+                                target_cell.get_mut(*allowed_tile as usize).as_mut()
+                            {
+                                // if !backup.contains_key(&(target_index, *allowed_tile)) {
+                                //     backup.insert((target_index, *allowed_tile), *support);
+                                // }
 
-                        support[ordinal] -= delta;
+                                backup
+                                    .entry((target_index, *allowed_tile))
+                                    .or_insert(*support);
 
-                        if support[ordinal] <= 0 {
-                            target_cell.remove(target_tile as usize);
-                            newly_removed_tiles.insert(target_tile);
+                                // support[ordinal] -= delta;
+                                support[ordinal] -= 1;
 
-                            if target_cell.cached_len == 0 {
-                                // unsatisfiable.
-                                return (Some(target_index), backup);
+                                if support[ordinal] <= 0 {
+                                    target_cell.remove(*allowed_tile as usize);
+                                    newly_removed_tiles.set(*allowed_tile as usize);
+
+                                    if target_cell.cached_len == 0 {
+                                        // unsatisfiable.
+                                        return (Some(target_index), backup);
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                if newly_removed_tiles.len() > 0 {
+                if newly_removed_tiles.pop_cnt() > 0 {
                     let mut was_found = false;
                     for i in &mut pq {
                         if i.target_index == target_index {
-                            i.removed.extend(newly_removed_tiles.clone());
-                            i.projected_possibilities = i.removed.len() as isize;
+                            i.removed.union(&newly_removed_tiles);
                             was_found = true;
                             break;
                         }
@@ -946,12 +956,13 @@ impl Wave2 {
                     if !was_found {
                         pq.push(Node {
                             target_index,
-                            projected_possibilities: newly_removed_tiles.len() as isize,
                             removed: newly_removed_tiles,
                         });
                     }
 
-                    pq.sort_by(|a, b| a.projected_possibilities.cmp(&b.projected_possibilities));
+                    // pq.sort_by(|a, b| a.projected_possibilities.cmp(&b.projected_possibilities));
+                    // pq.sort_by(|a, b| a.target_index.cmp(&b.target_index));
+                    pq.sort();
                 }
             }
         }
@@ -1023,11 +1034,19 @@ impl Wave2 {
             panic!("can't collapse this one.");
         }
 
-        let mut all_tiles: Vec<_> = (&self.cells[index]).into_iter().collect();
-        let chosen_index = Uniform::from(0..all_tiles.len()).sample(&mut rng);
-        all_tiles.remove(chosen_index);
+        let chosen_index = Uniform::from(0..self.cells[index].cached_len).sample(&mut rng);
 
-        all_tiles.into_iter().map(|x| x.0 as u16).collect()
+        let mut hs = HashSet::with_capacity(self.cells[index].cached_len - 1);
+
+        hs.extend(
+            (&self.cells[index])
+                .into_iter()
+                .enumerate()
+                .filter(|(index, _)| *index != chosen_index)
+                .map(|(_, b)| b.0),
+        );
+
+        hs
     }
 
     pub fn normalize_support(&mut self, x_min: isize, y_min: isize, x_max: isize, y_max: isize) {
@@ -1060,7 +1079,7 @@ impl Wave2 {
                     panic!();
                 }
 
-                self.print_wave();
+                // self.print_wave();
             }
         }
     }

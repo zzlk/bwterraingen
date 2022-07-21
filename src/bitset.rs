@@ -1,3 +1,5 @@
+use tracing::info;
+
 #[derive(Eq, PartialEq, Clone, Debug, Hash, Copy)]
 pub(crate) struct BitSet<const N: usize> {
     pub bits: [usize; N],
@@ -88,29 +90,34 @@ impl<'a, const N: usize> IntoIterator for &'a BitSet<N> {
     fn into_iter(self) -> Self::IntoIter {
         BitSetIterator {
             bitset: self,
-            index: 0,
+            word_index: 0,
+            current_usize: self.bits[0],
         }
     }
 }
 
 pub struct BitSetIterator<'a, const N: usize> {
     bitset: &'a BitSet<N>,
-    index: usize,
+    word_index: usize,
+    current_usize: usize,
 }
 
 impl<'a, const N: usize> Iterator for BitSetIterator<'a, N> {
     type Item = usize;
     fn next(&mut self) -> Option<Self::Item> {
-        for i in self.index..self.bitset.bits.len() * BITS_PER_WORD {
-            if self.bitset.bits[i / BITS_PER_WORD] & (1 << (i % BITS_PER_WORD))
-                == (1 << (i % BITS_PER_WORD))
-            {
-                self.index = i + 1;
-                return Some(i);
+        while self.word_index < self.bitset.bits.len() - 1 {
+            let trailing_zeroes = self.current_usize.trailing_zeros();
+            if trailing_zeroes == (std::mem::size_of::<usize>() * 8) as u32 {
+                self.word_index += 1;
+                self.current_usize = self.bitset.bits[self.word_index];
+            } else {
+                self.current_usize &= !(1 << trailing_zeroes);
+                return Some(
+                    trailing_zeroes as usize + self.word_index * (std::mem::size_of::<usize>() * 8),
+                );
             }
         }
 
-        self.index = self.bitset.bits.len() * BITS_PER_WORD;
         None
     }
 }
