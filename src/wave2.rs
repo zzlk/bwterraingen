@@ -2,20 +2,17 @@ use crate::bitset::BitSet;
 use crate::rules::Rules;
 use crate::{DIRECTIONS, MAX_TILE_BITS, MAX_TILE_IDS};
 use anyhow::Result;
-use cached::proc_macro::cached;
-use cached::CachedAsync;
 use instant::Instant;
 use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::{self, Ordering};
-use std::collections::{HashMap, HashSet, LinkedList, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 #[derive(Debug)]
 struct FlatRules {
-    era: u16,
     ruleset: [[Option<HashSet<u16>>; MAX_TILE_IDS]; 4],
 }
 
@@ -176,10 +173,7 @@ impl Wave2 {
             new_rules[0].as_ref().iter().filter(|x| x.is_some()).count()
         );
 
-        let rules = FlatRules {
-            ruleset: new_rules,
-            era: rules.era,
-        };
+        let rules = FlatRules { ruleset: new_rules };
 
         // initialize all cells in the map to be able to be every possible tile.
         let mut example_cell = Cell::new();
@@ -804,7 +798,7 @@ impl Wave2 {
                     );
                 }
                 self.cells[start].remove(*tile as usize);
-                removed.set(*tile as usize);
+                removed.insert(*tile as usize);
             }
         }
 
@@ -931,7 +925,7 @@ impl Wave2 {
 
                                 if support[ordinal] <= 0 {
                                     target_cell.remove(*allowed_tile as usize);
-                                    newly_removed_tiles.set(*allowed_tile as usize);
+                                    newly_removed_tiles.insert(*allowed_tile as usize);
 
                                     if target_cell.cached_len == 0 {
                                         // unsatisfiable.
@@ -943,7 +937,7 @@ impl Wave2 {
                     }
                 }
 
-                if newly_removed_tiles.pop_cnt() > 0 {
+                if newly_removed_tiles.len() > 0 {
                     let mut was_found = false;
                     for i in &mut pq {
                         if i.target_index == target_index {
@@ -1091,14 +1085,6 @@ impl Wave2 {
         nuke_radius: isize,
     ) -> Result<Wave2> {
         update(&self);
-
-        // // shrink it to save memory
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let index = (x + y * self.width) as usize;
-                let source_cell = &mut self.cells[index];
-            }
-        }
 
         self.cells.shrink_to_fit();
 

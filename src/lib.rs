@@ -1,7 +1,7 @@
 mod bitset;
 mod chk;
 mod rules;
-mod wave;
+// mod wave;
 mod wave2;
 
 pub(crate) const DIRECTIONS: [(isize, isize); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
@@ -13,6 +13,6 @@ pub use chk::get_dim_from_chk;
 pub use chk::get_list_of_unique_tiles_from_chk;
 pub use chk::get_rules_from_chk;
 pub use rules::Rules;
-pub use wave::Wave;
+// pub use wave::Wave;
 
 pub use wave2::Wave2;
