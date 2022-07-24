@@ -116,7 +116,7 @@ pub fn create_chk_from_wave(map: &Vec<u16>, era: u16, width: usize, height: usiz
     bytes.extend_from_slice(b"MASK");
     bytes.extend_from_slice(((width * height) as u32).to_le_bytes().as_slice());
     for _ in 0..(width * height) {
-        bytes.extend_from_slice(0u8.to_le_bytes().as_slice());
+        bytes.extend_from_slice(0xFFu8.to_le_bytes().as_slice());
     }
 
     bytes.extend_from_slice(b"ERA ");
