@@ -164,7 +164,9 @@ impl Wave2 {
                     for allowed_tile in allowed_tiles {
                         allowed_tiles_remapped.insert(mapping[allowed_tile]);
                     }
-                    rule[mapping[tile] as usize] = Some(allowed_tiles_remapped.drain().collect());
+                    let mut v: Vec<_> = allowed_tiles_remapped.drain().collect();
+                    v.sort_unstable();
+                    rule[mapping[tile] as usize] = Some(v);
                 }
 
                 *new_rule = rule;
@@ -391,14 +393,21 @@ impl Wave2 {
             let chosen = pq.pop().unwrap();
             let current_index = chosen.target_index;
 
-            for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                let (source_x, source_y) = (
-                    current_index as isize % self.width,
-                    current_index as isize / self.width,
-                );
-                assert!(source_x >= 0 && source_x < self.width);
-                assert!(source_y >= 0 && source_y < self.height);
+            let (source_x, source_y) = (
+                current_index as isize % self.width,
+                current_index as isize / self.width,
+            );
+            assert!(source_x >= 0 && source_x < self.width);
+            assert!(source_y >= 0 && source_y < self.height);
 
+            // chosen.removed.sort_unstable();
+            // self.print_wave();
+            // info!(
+            //     "source: {source_x},{source_y}, removed: {:?}",
+            //     chosen.removed,
+            // );
+
+            for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
                 let target_x = source_x + direction.0;
                 let target_y = source_y + direction.1;
 
@@ -418,6 +427,15 @@ impl Wave2 {
                     }
 
                     if let Some(rule) = &rules.ruleset[ordinal][*removed_tile as usize] {
+                        // info!(
+                        //     "target_x: {}, target_y: {}, ordinal: {}, &chosen.removed: {}, rule.len: {}, target_cell.len(): {}",
+                        //     target_x,
+                        //     target_y,
+                        //     ordinal,
+                        //     chosen.removed.len(),
+                        //     rule.len(),
+                        //     target_cell.cached_len
+                        // );
                         for allowed_tile in rule {
                             let m = target_cell.get_unchecked_mut(*allowed_tile as usize);
                             if m.is_none() {
@@ -489,9 +507,11 @@ impl Wave2 {
         anyhow::ensure!(entropies.len() >= 1);
 
         entropies.shuffle(&mut rng);
-        entropies.sort_unstable_by_key(|x| x.1);
+        entropies.sort_unstable_by_key(|x| (x.1 as isize));
 
         entropies.truncate(cmp::max(2, at_least));
+
+        entropies.sort_unstable_by_key(|x| -(x.1 as isize));
 
         anyhow::Ok(entropies)
     }
@@ -583,6 +603,11 @@ impl Wave2 {
             let current_index = current_indices.pop();
 
             if current_index == None {
+                if propagation_backups.len() == 0 || indices.len() == 0 {
+                    error!("No way to unpropagate.");
+                    return anyhow::Ok(current_wave.clone());
+                }
+
                 current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
                 current_indices = indices.pop_front().unwrap();
                 continue;
@@ -610,7 +635,7 @@ impl Wave2 {
 
                 *failures_entry += 1;
 
-                if *failures_entry > 64 {
+                if *failures_entry > 128 {
                     error!("NUKE");
                     failures.clear();
 
