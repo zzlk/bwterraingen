@@ -110,7 +110,6 @@ pub struct Wave2 {
     pub height: isize,
     cells: Vec<Cell>,
     rules: Rc<FlatRules>,
-    example_cell: Rc<Cell>,
     inverse_mapping: Rc<HashMap<u16, u16>>,
 }
 
@@ -208,7 +207,6 @@ impl Wave2 {
             height: height,
             cells: vec![example_cell.clone(); (width * height) as usize], //Vec::with_capacity((width * height) as usize),
             rules: Rc::new(rules),
-            example_cell: Rc::new(example_cell),
             inverse_mapping: Rc::new(inverse_mapping),
         };
 
@@ -597,7 +595,7 @@ impl Wave2 {
 
             let (failed_at, propagation_backup) = current_wave.propagate_remove(index, &to_remove);
 
-            if let Some(failed_at) = failed_at {
+            if let Some(_) = failed_at {
                 // self.unpropagate(index, &to_remove);
                 current_wave.unpropagate_v2(&propagation_backup);
                 depth -= 1;
