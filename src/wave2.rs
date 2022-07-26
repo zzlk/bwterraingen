@@ -454,6 +454,7 @@ impl Wave2 {
                                     newly_removed_tiles.push(*allowed_tile);
 
                                     if target_cell.cached_len == 0 {
+                                        backup.shrink_to_fit();
                                         return (Some(target_index), backup);
                                     }
                                 }
@@ -487,6 +488,7 @@ impl Wave2 {
         // info!("post-propagate");
         // self.print_wave();
 
+        backup.shrink_to_fit();
         (None, backup)
     }
 
@@ -536,43 +538,11 @@ impl Wave2 {
         hs
     }
 
-    pub fn normalize_support(&mut self, x_min: isize, y_min: isize, x_max: isize, y_max: isize) {
-        for y in y_min..=y_max {
-            for x in x_min..=x_max {
-                let index = (x + y * self.width) as usize;
-
-                let mut to_remove = HashSet::new();
-                for (tile, support) in &self.cells[index] {
-                    for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                        let source_x = x - direction.0;
-                        let source_y = y - direction.1;
-
-                        if source_x < 0
-                            || source_x >= self.width
-                            || source_y < 0
-                            || source_y >= self.height
-                        {
-                            continue;
-                        }
-
-                        if support[ordinal] <= 0 {
-                            to_remove.insert(tile);
-                        }
-                    }
-                }
-
-                if self.propagate_remove(index, &to_remove).0.is_some() {
-                    panic!();
-                }
-            }
-        }
-    }
-
     pub fn logical_conclusion<F: Fn(&Wave2)>(
         &mut self,
         update: &F,
         update_interval: u32,
-        nuke_radius: isize,
+        _nuke_radius: isize,
     ) -> Result<Wave2> {
         update(&self);
 
@@ -588,14 +558,17 @@ impl Wave2 {
 
         let mut last_time = Instant::now();
 
-        let mut failures = HashMap::new();
+        let mut failures_at_current_max_depth = 0;
+        let mut depth = 0;
+        let mut max_depth = 0;
+        let mut times_nuked_at_current_max_depth = 0;
 
         current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
 
         debug!("start main loop");
 
         loop {
-            while propagation_backups.len() > 100 {
+            while propagation_backups.len() > 400 {
                 indices.pop_back();
                 propagation_backups.pop_back();
             }
@@ -627,52 +600,32 @@ impl Wave2 {
             if let Some(failed_at) = failed_at {
                 // self.unpropagate(index, &to_remove);
                 current_wave.unpropagate_v2(&propagation_backup);
+                depth -= 1;
 
-                let failed_x = failed_at as isize % self.width;
-                let failed_y = failed_at as isize / self.width;
+                // let failed_x = failed_at as isize % self.width;
+                // let failed_y = failed_at as isize / self.width;
 
-                let failures_entry = failures.entry((failed_x, failed_y)).or_insert(0);
+                // let failures_entry = failures.entry((failed_x, failed_y)).or_insert(0);
 
-                *failures_entry += 1;
+                failures_at_current_max_depth += 1;
 
-                if *failures_entry > 128 {
+                if failures_at_current_max_depth > 128 {
+                    failures_at_current_max_depth = 0;
+                    times_nuked_at_current_max_depth += 1;
+
                     error!("NUKE");
-                    failures.clear();
 
-                    // nuke area
-                    for dy in -nuke_radius..=nuke_radius {
-                        for dx in -nuke_radius..=nuke_radius {
-                            let nuke_x = failed_x + dx;
-                            let nuke_y = failed_y + dy;
-
-                            if nuke_x < 0
-                                || nuke_x >= self.width
-                                || nuke_y < 0
-                                || nuke_y >= self.height
-                            {
-                                continue;
-                            }
-
-                            let nuke_index = (nuke_x + nuke_y * self.width) as usize;
-
-                            current_wave.cells[nuke_index] = (*self.example_cell).clone();
-                        }
+                    for _ in 0..std::cmp::min(
+                        times_nuked_at_current_max_depth * times_nuked_at_current_max_depth,
+                        propagation_backups.len(),
+                    ) {
+                        depth -= 1;
+                        current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
+                        indices.pop_front().unwrap();
                     }
 
-                    self.normalize_support(
-                        std::cmp::max(failed_x - (nuke_radius + 1), 0),
-                        std::cmp::max(failed_y - (nuke_radius + 1), 0),
-                        std::cmp::min(failed_x + (nuke_radius + 1), self.width - 1),
-                        std::cmp::min(failed_y + (nuke_radius + 1), self.height - 1),
-                    );
-
-                    propagation_backups.clear();
-                    indices.clear();
-
-                    current_indices =
-                        current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
+                    current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 10)?;
                 }
-
                 continue;
             }
 
@@ -680,9 +633,19 @@ impl Wave2 {
                 return anyhow::Ok(current_wave.clone());
             }
 
+            depth += 1;
+            if depth > max_depth {
+                failures_at_current_max_depth = 0;
+                times_nuked_at_current_max_depth = 0;
+                max_depth = depth;
+            }
+
             propagation_backups.push_front(propagation_backup);
             indices.push_front(current_indices);
             current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 2)?;
+
+            indices.shrink_to_fit();
+            propagation_backups.shrink_to_fit();
         }
     }
 }
