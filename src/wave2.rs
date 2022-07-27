@@ -352,7 +352,7 @@ impl Wave2 {
 
         impl Ord for Node {
             fn cmp(&self, other: &Self) -> Ordering {
-                self.target_index.cmp(&other.target_index)
+                other.target_index.cmp(&self.target_index)
             }
         }
 
