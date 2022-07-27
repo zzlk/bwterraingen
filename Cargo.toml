@@ -20,6 +20,8 @@ serde = "*"
 anyhow = "*"
 tracing = "*"
 
+hashbrown = { version = "*", features = ["serde"] }
+
 [dev-dependencies]
 quickcheck = "*"
 quickcheck_macros = "*"

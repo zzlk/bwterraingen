@@ -2,12 +2,13 @@ use crate::bitset::BitSet;
 use crate::rules::Rules;
 use crate::{DIRECTIONS, MAX_TILE_BITS, MAX_TILE_IDS};
 use anyhow::Result;
+use hashbrown::{HashMap, HashSet};
 use instant::Instant;
 use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::{self, Ordering};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::rc::Rc;
 use tracing::{debug, error, info};
 
