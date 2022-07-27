@@ -19,49 +19,53 @@ struct FlatRules {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Cell {
-    stuff: [Option<[i16; 4]>; MAX_TILE_IDS],
-    cached_len: usize,
+    stuff: [[usize; 4]; MAX_TILE_IDS],
+    active: HashSet<usize>,
 }
 
 impl Cell {
     fn new() -> Cell {
         Cell {
-            stuff: [Option::<[i16; 4]>::None; MAX_TILE_IDS],
-            cached_len: 0,
+            stuff: [[0usize; 4]; MAX_TILE_IDS],
+            active: HashSet::new(),
         }
     }
 
-    fn get(&self, tile: usize) -> &Option<[i16; 4]> {
+    fn get(&self, tile: usize) -> &[usize; 4] {
         &self.stuff[tile]
     }
 
-    fn get_mut(&mut self, tile: usize) -> &mut Option<[i16; 4]> {
+    fn get_mut(&mut self, tile: usize) -> &mut [usize; 4] {
         &mut self.stuff[tile]
     }
 
-    fn get_unchecked_mut(&mut self, tile: usize) -> &mut Option<[i16; 4]> {
+    fn get_unchecked_mut(&mut self, tile: usize) -> &mut [usize; 4] {
         unsafe { self.stuff.get_unchecked_mut(tile) }
     }
 
     fn remove(&mut self, tile: usize) {
-        if self.stuff[tile].is_some() {
-            self.cached_len -= 1;
-            self.stuff[tile] = None;
-        }
+        self.active.remove(&tile);
     }
 
-    fn insert(&mut self, tile: usize, v: [i16; 4]) {
-        if self.stuff[tile].is_none() {
-            self.cached_len += 1;
-        }
-        self.stuff[tile] = Some(v);
+    fn is_active(&self, tile: usize) -> bool {
+        self.active.contains(&tile)
+    }
+
+    fn set(&mut self, tile: usize, v: [usize; 4]) {
+        self.active.insert(tile);
+        self.stuff[tile] = v;
+    }
+
+    fn len(&self) -> usize {
+        self.active.len()
     }
 
     fn get_singular(&self) -> u16 {
         self.stuff
             .iter()
             .enumerate()
-            .filter_map(|x| x.1.as_ref().map(|y| (x.0 as u16, y)))
+            .filter(|x| self.is_active(x.0))
+            .map(|x| (x.0 as u16, x.1))
             .next()
             .unwrap()
             .0
@@ -73,31 +77,31 @@ impl Cell {
 }
 
 impl<'a> IntoIterator for &'a Cell {
-    type Item = (u16, [i16; 4]);
+    type Item = (u16, [usize; 4]);
     type IntoIter = CellIterator<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         CellIterator {
-            index: 0,
+            tile: 0,
             parent: self,
         }
     }
 }
 
 struct CellIterator<'a> {
-    index: usize,
+    tile: usize,
     parent: &'a Cell,
 }
 
 impl<'a> Iterator for CellIterator<'a> {
-    type Item = (u16, [i16; 4]);
+    type Item = (u16, [usize; 4]);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.index < self.parent.stuff.len() {
-            self.index += 1;
+        while self.tile < self.parent.stuff.len() {
+            self.tile += 1;
 
-            if let Some(support) = self.parent.stuff[self.index - 1] {
-                return Some(((self.index - 1) as u16, support));
+            if self.parent.is_active(self.tile - 1) {
+                return Some(((self.tile - 1) as u16, self.parent.stuff[self.tile - 1]));
             }
         }
 
@@ -185,7 +189,7 @@ impl Wave2 {
 
         // Calculate the kind of 'all-tiles' cell
         for tile in inverse_mapping.keys() {
-            example_cell.insert(*tile as usize, [0, 0, 0, 0])
+            example_cell.set(*tile as usize, [0, 0, 0, 0])
         }
 
         let mut wave = Wave2 {
@@ -204,8 +208,7 @@ impl Wave2 {
 
                     if template_map[index] != *mask_tile {
                         wave.cells[index] = Cell::new();
-                        wave.cells[index]
-                            .insert(mapping[&template_map[index]] as usize, [0, 0, 0, 0]);
+                        wave.cells[index].set(mapping[&template_map[index]] as usize, [0, 0, 0, 0]);
                     }
                 }
             }
@@ -273,7 +276,7 @@ impl Wave2 {
                 output = format!(
                     "{}{:6}",
                     output,
-                    self.cells[(x + y * self.width) as usize].cached_len
+                    self.cells[(x + y * self.width) as usize].len()
                 );
             }
             info!("{}", output);
@@ -283,7 +286,7 @@ impl Wave2 {
     pub fn render(&self) -> Vec<u16> {
         let mut ret = Vec::new();
         for v in &self.cells {
-            if v.cached_len == 1 {
+            if v.len() == 1 {
                 ret.push(self.inverse_mapping[&(v.get_singular())]);
             } else {
                 ret.push(15);
@@ -294,7 +297,7 @@ impl Wave2 {
 
     pub fn is_done(&self) -> bool {
         for v in &self.cells {
-            if v.cached_len != 1 {
+            if v.len() != 1 {
                 return false;
             }
         }
@@ -302,9 +305,9 @@ impl Wave2 {
         true
     }
 
-    pub fn unpropagate_v2(&mut self, propagation_backups: &HashMap<(usize, u16), [i16; 4]>) {
+    pub fn unpropagate_v2(&mut self, propagation_backups: &HashMap<(usize, u16), [usize; 4]>) {
         for ((index, tile), pb) in propagation_backups {
-            self.cells[*index].insert(*tile as usize, *pb);
+            self.cells[*index].set(*tile as usize, *pb);
         }
     }
 
@@ -314,12 +317,7 @@ impl Wave2 {
         let target_index = (target_x + target_y * self.width) as usize;
 
         for tile in tiles {
-            let m = self.cells[target_index]
-                .get_mut(*tile as usize)
-                .as_mut()
-                .unwrap();
-
-            *m = [0, 0, 0, 0];
+            self.cells[target_index].set(*tile as usize, [0, 0, 0, 0]);
         }
 
         for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
@@ -337,12 +335,7 @@ impl Wave2 {
                 if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
                     for allowed_tile in rule {
                         if tiles.contains(allowed_tile) {
-                            let m = self.cells[target_index]
-                                .get_mut(*allowed_tile as usize)
-                                .as_mut()
-                                .unwrap();
-
-                            m[ordinal] += 1;
+                            self.cells[target_index].get_mut(*allowed_tile as usize)[ordinal] += 1;
                         }
                     }
                 }
@@ -354,7 +347,7 @@ impl Wave2 {
         &mut self,
         start: usize,
         to_remove: &HashSet<u16>,
-    ) -> (Option<usize>, HashMap<(usize, u16), [i16; 4]>) {
+    ) -> (Option<usize>, HashMap<(usize, u16), [usize; 4]>) {
         #[derive(Clone, Eq, PartialEq, Debug)]
         struct Node {
             target_index: usize,
@@ -381,12 +374,9 @@ impl Wave2 {
 
         let mut removed = Vec::new();
         for tile in to_remove {
-            if self.cells[start].get(*tile as usize).is_some() {
+            if self.cells[start].is_active(*tile as usize) {
                 if !backup.contains_key(&(start, *tile)) {
-                    backup.insert(
-                        (start, *tile),
-                        self.cells[start].get(*tile as usize).unwrap(),
-                    );
+                    backup.insert((start, *tile), *self.cells[start].get(*tile as usize));
                 }
                 self.cells[start].remove(*tile as usize);
                 removed.push(*tile);
@@ -446,23 +436,19 @@ impl Wave2 {
                         //     target_cell.cached_len
                         // );
                         for allowed_tile in rule {
-                            let m = target_cell.get_unchecked_mut(*allowed_tile as usize);
-                            if m.is_none() {
-                                continue;
-                            }
-
-                            if let &mut Some(ref mut support) = m {
+                            if target_cell.is_active(*allowed_tile as usize) {
+                                let support = target_cell.get_unchecked_mut(*allowed_tile as usize);
                                 backup
                                     .entry((target_index, *allowed_tile))
                                     .or_insert(*support);
 
                                 support[ordinal] -= 1;
 
-                                if support[ordinal] <= 0 {
+                                if support[ordinal] == 0 {
                                     target_cell.remove(*allowed_tile as usize);
                                     newly_removed_tiles.push(*allowed_tile);
 
-                                    if target_cell.cached_len == 0 {
+                                    if target_cell.len() == 0 {
                                         backup.shrink_to_fit();
                                         return (Some(target_index), backup);
                                     }
@@ -510,7 +496,7 @@ impl Wave2 {
         let mut entropies = self
             .cells
             .iter()
-            .map(|x| x.cached_len)
+            .map(|x| x.len())
             .enumerate()
             .filter(|&x| x.1 > 1)
             .collect::<Vec<(usize, usize)>>();
@@ -528,13 +514,13 @@ impl Wave2 {
     }
 
     pub fn choose_removal_set(&self, mut rng: &mut ThreadRng, index: usize) -> HashSet<u16> {
-        if self.cells[index].cached_len <= 1 {
+        if self.cells[index].len() <= 1 {
             panic!("can't collapse this one.");
         }
 
-        let chosen_index = Uniform::from(0..self.cells[index].cached_len).sample(&mut rng);
+        let chosen_index = Uniform::from(0..self.cells[index].len()).sample(&mut rng);
 
-        let mut hs = HashSet::with_capacity(self.cells[index].cached_len - 1);
+        let mut hs = HashSet::with_capacity(self.cells[index].len() - 1);
 
         hs.extend(
             self.cells[index]
@@ -697,6 +683,65 @@ mod test {
         }
     }
 
+    #[test]
+    fn basic_1x1() {
+        #[rustfmt::skip]
+        let rules = Rules::new(
+            2,
+            2,
+            &vec![
+                0, 0,
+                0, 0   
+            ],
+            &HashSet::new(),
+            0,
+        );
+        let wave = Wave2::new(1, 1, &rules, None);
+
+        assert_eq!(*wave.cells[0].get(0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn basic_1x2() {
+        #[rustfmt::skip]
+        let rules = Rules::new(
+            2,
+            2,
+            &vec![
+                0, 0,
+                0, 0,
+            ],
+            &HashSet::new(),
+            0,
+        );
+        let wave = Wave2::new(1, 2, &rules, None);
+
+        assert_eq!(wave.cells.len(), 2);
+        assert_eq!(*wave.cells[0].get(0), [1, 0, 0, 0]);
+        assert_eq!(*wave.cells[1].get(0), [0, 0, 1, 0]);
+    }
+
+    #[test]
+    fn basic_2x2() {
+        #[rustfmt::skip]
+        let rules = Rules::new(
+            2,
+            2,
+            &vec![
+                0, 0,
+                0, 0,
+            ],
+            &HashSet::new(),
+            0,
+        );
+        let wave = Wave2::new(2, 2, &rules, None);
+
+        assert_eq!(*wave.cells[0].get(0), [1, 0, 0, 1]);
+        assert_eq!(*wave.cells[1].get(0), [1, 1, 0, 0]);
+        assert_eq!(*wave.cells[2].get(0), [0, 0, 1, 1]);
+        assert_eq!(*wave.cells[3].get(0), [0, 1, 1, 0]);
+    }
+
     #[quickcheck]
     fn quickcheck_testcase(
         index: BoundedInt<0, { 4 * 4 }>,
@@ -729,7 +774,7 @@ mod test {
 
         let mut to_remove = HashSet::new();
 
-        assert!(wave.cells[index.0].cached_len > 0);
+        assert!(wave.cells[index.0].len() > 0);
         to_remove.insert(wave.cells[index.0].iter().next().unwrap().0 as u16);
 
         let mut new_wave = wave.clone();
