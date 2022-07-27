@@ -183,7 +183,7 @@ impl Wave2 {
         // initialize all cells in the map to be able to be every possible tile.
         let mut example_cell = Cell::new();
 
-        // Calculate the kind of 'maximum' cell
+        // Calculate the kind of 'all-tiles' cell
         for (ordinal, _) in DIRECTIONS.iter().enumerate() {
             for (_, allowed_tiles) in rules.ruleset[ordinal]
                 .iter()
@@ -194,11 +194,6 @@ impl Wave2 {
                     if example_cell.get(*allowed_tile as usize).is_none() {
                         example_cell.set(*allowed_tile as usize, [0, 0, 0, 0]);
                     }
-
-                    example_cell
-                        .get_mut(*allowed_tile as usize)
-                        .as_mut()
-                        .unwrap()[ordinal] += 1;
                 }
             }
         }
@@ -211,6 +206,17 @@ impl Wave2 {
             inverse_mapping: Rc::new(inverse_mapping),
         };
 
+        // calculate support of every tile
+        for target_y in 0..wave.height {
+            for target_x in 0..wave.width {
+                let index = (target_x + target_y * wave.width) as usize;
+
+                let tiles: HashSet<_> = wave.cells[index].iter().map(|x| x.0).collect();
+                wave.calculate_support(index, &tiles);
+            }
+        }
+
+        // remove tiles based on template.
         if let Some((template_map, mask_tile)) = &template_map_and_mask_tile {
             for y in 0..height {
                 for x in 0..width {
@@ -228,70 +234,39 @@ impl Wave2 {
             }
         }
 
-        // remove tiles with insufficient support
-        loop {
-            let mut was_empty = true;
-            for target_y in 0..wave.height {
-                for target_x in 0..wave.width {
-                    let index = (target_x + target_y * wave.width) as usize;
+        // find cells with insufficient support
+        let mut unsupported_tiles = HashMap::new();
+        for target_y in 0..wave.height {
+            for target_x in 0..wave.width {
+                let index = (target_x + target_y * wave.width) as usize;
 
-                    let mut to_remove = HashSet::new();
-                    for (tile, support) in &wave.cells[index] {
-                        for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                            let source_x = target_x - direction.0;
-                            let source_y = target_y - direction.1;
+                for (tile, support) in wave.cells[index].iter() {
+                    for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                        let source_x = target_x - direction.0;
+                        let source_y = target_y - direction.1;
 
-                            if source_x < 0
-                                || source_x >= wave.width
-                                || source_y < 0
-                                || source_y >= wave.height
-                            {
-                                continue;
-                            }
-
-                            if support[ordinal] <= 0 {
-                                to_remove.insert(tile);
-                            }
+                        if source_x < 0
+                            || source_x >= wave.width
+                            || source_y < 0
+                            || source_y >= wave.height
+                        {
+                            continue;
                         }
-                    }
 
-                    if !to_remove.is_empty() {
-                        was_empty = false;
-                        for tile in to_remove {
-                            wave.cells[index].remove(tile as usize);
-
-                            for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
-                                let target_x = target_x + direction.0;
-                                let target_y = target_y + direction.1;
-
-                                if target_x < 0
-                                    || target_x >= wave.width
-                                    || target_y < 0
-                                    || target_y >= wave.height
-                                {
-                                    continue;
-                                }
-
-                                let target_index = (target_x + target_y * wave.width) as usize;
-
-                                if let Some(ruleset) = &wave.rules.ruleset[ordinal][tile as usize] {
-                                    for allowed_tile in ruleset {
-                                        if let Some(support) =
-                                            wave.cells[target_index].get_mut(*allowed_tile as usize)
-                                        {
-                                            support[ordinal] -= 1;
-                                        }
-                                    }
-                                }
-                            }
+                        if support[ordinal] <= 0 {
+                            unsupported_tiles
+                                .entry(index)
+                                .or_insert(HashSet::new())
+                                .insert(tile);
                         }
                     }
                 }
             }
+        }
 
-            if was_empty == true {
-                break;
-            }
+        // remove unsupported tiles
+        for (index, tiles) in unsupported_tiles {
+            wave.propagate_remove(index, &tiles);
         }
 
         wave
@@ -332,6 +307,48 @@ impl Wave2 {
         }
 
         true
+    }
+
+    fn calculate_support(&mut self, index: usize, tiles: &HashSet<u16>) {
+        let target_x = index as isize % self.width;
+        let target_y = index as isize / self.width;
+        let target_index = (target_x + target_y * self.width) as usize;
+
+        for tile in tiles {
+            let m = self.cells[target_index]
+                .get_mut(*tile as usize)
+                .as_mut()
+                .unwrap();
+
+            *m = [0, 0, 0, 0];
+        }
+
+        for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+            let source_x = target_x - direction.0;
+            let source_y = target_y - direction.1;
+
+            if source_x < 0 || source_x >= self.width || source_y < 0 || source_y >= self.height {
+                continue;
+            }
+
+            let source_index = (source_x + source_y * self.width) as usize;
+
+            let source_tiles: Vec<_> = self.cells[source_index].iter().map(|x| x.0).collect();
+            for source_tile in source_tiles {
+                if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
+                    for allowed_tile in rule {
+                        if tiles.contains(allowed_tile) {
+                            let m = self.cells[target_index]
+                                .get_mut(*allowed_tile as usize)
+                                .as_mut()
+                                .unwrap();
+
+                            m[ordinal] += 1;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn unpropagate_v2(&mut self, propagation_backups: &HashMap<(usize, u16), [i16; 4]>) {
