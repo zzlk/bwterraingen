@@ -31,30 +31,30 @@ impl Cell {
         }
     }
 
-    fn get(&self, index: usize) -> &Option<[i16; 4]> {
-        &self.stuff[index]
+    fn get(&self, tile: usize) -> &Option<[i16; 4]> {
+        &self.stuff[tile]
     }
 
-    fn get_mut(&mut self, index: usize) -> &mut Option<[i16; 4]> {
-        unsafe { self.stuff.get_unchecked_mut(index) }
+    fn get_mut(&mut self, tile: usize) -> &mut Option<[i16; 4]> {
+        &mut self.stuff[tile]
     }
 
-    fn get_unchecked_mut(&mut self, index: usize) -> &mut Option<[i16; 4]> {
-        unsafe { self.stuff.get_unchecked_mut(index) }
+    fn get_unchecked_mut(&mut self, tile: usize) -> &mut Option<[i16; 4]> {
+        unsafe { self.stuff.get_unchecked_mut(tile) }
     }
 
-    fn remove(&mut self, index: usize) {
-        if self.stuff[index].is_some() {
+    fn remove(&mut self, tile: usize) {
+        if self.stuff[tile].is_some() {
             self.cached_len -= 1;
-            self.stuff[index] = None;
+            self.stuff[tile] = None;
         }
     }
 
-    fn set(&mut self, index: usize, v: [i16; 4]) {
-        if self.stuff[index].is_none() {
+    fn insert(&mut self, tile: usize, v: [i16; 4]) {
+        if self.stuff[tile].is_none() {
             self.cached_len += 1;
         }
-        self.stuff[index] = Some(v);
+        self.stuff[tile] = Some(v);
     }
 
     fn get_singular(&self) -> u16 {
@@ -184,18 +184,8 @@ impl Wave2 {
         let mut example_cell = Cell::new();
 
         // Calculate the kind of 'all-tiles' cell
-        for (ordinal, _) in DIRECTIONS.iter().enumerate() {
-            for (_, allowed_tiles) in rules.ruleset[ordinal]
-                .iter()
-                .enumerate()
-                .filter_map(|x| x.1.as_ref().map(|y| (x.0 as u16, y)))
-            {
-                for allowed_tile in allowed_tiles {
-                    if example_cell.get(*allowed_tile as usize).is_none() {
-                        example_cell.set(*allowed_tile as usize, [0, 0, 0, 0]);
-                    }
-                }
-            }
+        for tile in inverse_mapping.keys() {
+            example_cell.insert(*tile as usize, [0, 0, 0, 0])
         }
 
         let mut wave = Wave2 {
@@ -214,7 +204,8 @@ impl Wave2 {
 
                     if template_map[index] != *mask_tile {
                         wave.cells[index] = Cell::new();
-                        wave.cells[index].set(mapping[&template_map[index]] as usize, [0, 0, 0, 0]);
+                        wave.cells[index]
+                            .insert(mapping[&template_map[index]] as usize, [0, 0, 0, 0]);
                     }
                 }
             }
@@ -311,6 +302,12 @@ impl Wave2 {
         true
     }
 
+    pub fn unpropagate_v2(&mut self, propagation_backups: &HashMap<(usize, u16), [i16; 4]>) {
+        for ((index, tile), pb) in propagation_backups {
+            self.cells[*index].insert(*tile as usize, *pb);
+        }
+    }
+
     fn calculate_support(&mut self, index: usize, tiles: &HashSet<u16>) {
         let target_x = index as isize % self.width;
         let target_y = index as isize / self.width;
@@ -350,12 +347,6 @@ impl Wave2 {
                     }
                 }
             }
-        }
-    }
-
-    pub fn unpropagate_v2(&mut self, propagation_backups: &HashMap<(usize, u16), [i16; 4]>) {
-        for ((index, tile), pb) in propagation_backups {
-            self.cells[*index].set(*tile as usize, *pb);
         }
     }
 
