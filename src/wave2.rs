@@ -206,6 +206,20 @@ impl Wave2 {
             inverse_mapping: Rc::new(inverse_mapping),
         };
 
+        // Set tiles based on template
+        if let Some((template_map, mask_tile)) = &template_map_and_mask_tile {
+            for y in 0..height {
+                for x in 0..width {
+                    let index = (x + y * width) as usize;
+
+                    if template_map[index] != *mask_tile {
+                        wave.cells[index] = Cell::new();
+                        wave.cells[index].set(mapping[&template_map[index]] as usize, [0, 0, 0, 0]);
+                    }
+                }
+            }
+        }
+
         // calculate support of every tile
         for target_y in 0..wave.height {
             for target_x in 0..wave.width {
@@ -216,29 +230,17 @@ impl Wave2 {
             }
         }
 
-        // remove tiles based on template.
-        if let Some((template_map, mask_tile)) = &template_map_and_mask_tile {
-            for y in 0..height {
-                for x in 0..width {
-                    let index = (x + y * width) as usize;
-
-                    if template_map[index] != *mask_tile {
-                        let mut to_remove: HashSet<_> =
-                            wave.inverse_mapping.keys().cloned().collect();
-
-                        assert!(to_remove.remove(&mapping[&template_map[index]]));
-
-                        wave.propagate_remove(index, &to_remove);
-                    }
-                }
-            }
-        }
-
-        // find cells with insufficient support
+        // find cells with insufficient support, ignore template tiles
         let mut unsupported_tiles = HashMap::new();
         for target_y in 0..wave.height {
             for target_x in 0..wave.width {
                 let index = (target_x + target_y * wave.width) as usize;
+
+                if let Some((template_map, mask_tile)) = &template_map_and_mask_tile {
+                    if template_map[index] != *mask_tile {
+                        continue;
+                    }
+                }
 
                 for (tile, support) in wave.cells[index].iter() {
                     for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
@@ -584,7 +586,7 @@ impl Wave2 {
         debug!("start main loop");
 
         loop {
-            while propagation_backups.len() > 400 {
+            while propagation_backups.len() > 600 {
                 indices.pop_back();
                 propagation_backups.pop_back();
             }
