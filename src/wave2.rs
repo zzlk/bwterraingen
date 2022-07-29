@@ -1,4 +1,4 @@
-use crate::bitset::BitSet;
+use crate::bitset::{BitSet, BitSetIterator};
 use crate::rules::Rules;
 use crate::{DIRECTIONS, MAX_TILE_BITS, MAX_TILE_IDS};
 use anyhow::Result;
@@ -20,14 +20,14 @@ struct FlatRules {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Cell {
     stuff: [[isize; 4]; MAX_TILE_IDS],
-    active: HashSet<usize>,
+    active: BitSet<MAX_TILE_BITS>,
 }
 
 impl Cell {
     fn new() -> Cell {
         Cell {
             stuff: [[0isize; 4]; MAX_TILE_IDS],
-            active: HashSet::new(),
+            active: BitSet::new(),
         }
     }
 
@@ -47,7 +47,7 @@ impl Cell {
     }
 
     fn deactivate(&mut self, tile: usize) {
-        self.active.remove(&tile);
+        self.active.remove(tile);
     }
 
     fn activate(&mut self, tile: usize) {
@@ -55,7 +55,7 @@ impl Cell {
     }
 
     fn is_active(&self, tile: usize) -> bool {
-        self.active.contains(&tile)
+        self.active.get(tile)
     }
 
     fn set(&mut self, tile: usize, v: [isize; 4]) {
@@ -77,43 +77,43 @@ impl Cell {
             .0
     }
 
-    fn iter(&self) -> CellIterator {
-        self.into_iter()
+    fn iter(&self) -> BitSetIterator<MAX_TILE_BITS> {
+        self.active.iter()
     }
 }
 
-impl<'a> IntoIterator for &'a Cell {
-    type Item = (u16, [isize; 4]);
-    type IntoIter = CellIterator<'a>;
+// impl<'a> IntoIterator for &'a Cell {
+//     type Item = (u16, [isize; 4]);
+//     type IntoIter = CellIterator<'a>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        CellIterator {
-            tile: 0,
-            parent: self,
-        }
-    }
-}
+//     fn into_iter(self) -> Self::IntoIter {
+//         CellIterator {
+//             tile: 0,
+//             parent: self,
+//         }
+//     }
+// }
 
-struct CellIterator<'a> {
-    tile: usize,
-    parent: &'a Cell,
-}
+// struct CellIterator<'a> {
+//     tile: usize,
+//     parent: &'a Cell,
+// }
 
-impl<'a> Iterator for CellIterator<'a> {
-    type Item = (u16, [isize; 4]);
+// impl<'a> Iterator for CellIterator<'a> {
+//     type Item = (u16, [isize; 4]);
 
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.tile < self.parent.stuff.len() {
-            self.tile += 1;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         while self.tile < self.parent.stuff.len() {
+//             self.tile += 1;
 
-            if self.parent.is_active(self.tile - 1) {
-                return Some(((self.tile - 1) as u16, self.parent.stuff[self.tile - 1]));
-            }
-        }
+//             if self.parent.is_active(self.tile - 1) {
+//                 return Some(((self.tile - 1) as u16, self.parent.stuff[self.tile - 1]));
+//             }
+//         }
 
-        None
-    }
-}
+//         None
+//     }
+// }
 
 #[derive(Debug, Clone)]
 pub struct Wave2 {
@@ -214,11 +214,7 @@ impl Wave2 {
                     let index = (x + y * width) as usize;
 
                     if template_map[index] != *mask_tile {
-                        let other_tiles: Vec<_> = wave.cells[index]
-                            .iter()
-                            .filter(|x| x.0 != mapping[&template_map[index]])
-                            .map(|x| x.0)
-                            .collect();
+                        let other_tiles: Vec<_> = wave.cells[index].iter().collect();
                         for tile in other_tiles {
                             wave.cells[index].deactivate(tile as usize);
                         }
@@ -252,7 +248,7 @@ impl Wave2 {
                     }
                 }
 
-                for (tile, support) in wave.cells[index].iter() {
+                for tile in wave.cells[index].iter() {
                     for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
                         let source_x = target_x - direction.0;
                         let source_y = target_y - direction.1;
@@ -265,11 +261,11 @@ impl Wave2 {
                             continue;
                         }
 
-                        if support[ordinal] <= 0 {
+                        if wave.cells[index].get(tile)[ordinal] <= 0 {
                             unsupported_tiles
                                 .entry(index)
                                 .or_insert(HashSet::new())
-                                .insert(tile);
+                                .insert(tile as u16);
                         }
                     }
                 }
@@ -343,7 +339,7 @@ impl Wave2 {
 
             let source_index = (source_x + source_y * self.width) as usize;
 
-            let source_tiles: Vec<_> = self.cells[source_index].iter().map(|x| x.0).collect();
+            let source_tiles: Vec<_> = self.cells[source_index].iter().collect();
             for source_tile in source_tiles {
                 if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
                     for allowed_tile in rule {
@@ -556,7 +552,7 @@ impl Wave2 {
                 .iter()
                 .enumerate()
                 .filter(|(index, _)| *index != chosen_index)
-                .map(|(_, b)| b.0),
+                .map(|(_, b)| b as u16),
         );
 
         hs
@@ -803,7 +799,7 @@ mod test {
         let mut to_remove = HashSet::new();
 
         assert!(wave.cells[index.0].len() > 0);
-        to_remove.insert(wave.cells[index.0].iter().next().unwrap().0 as u16);
+        to_remove.insert(wave.cells[index.0].iter().next().unwrap() as u16);
 
         let mut new_wave = wave.clone();
         // let (s, pb) = new_wave.propagate_remove(index.0, &to_remove);
@@ -843,7 +839,7 @@ mod test {
         let remove_index = 0;
 
         assert!(wave.cells[remove_index].len() > 0);
-        to_remove.insert(wave.cells[remove_index].iter().next().unwrap().0 as u16);
+        to_remove.insert(wave.cells[remove_index].iter().next().unwrap() as u16);
 
         let mut new_wave = wave.clone();
         // let (s, pb) = new_wave.propagate_remove(index.0, &to_remove);
