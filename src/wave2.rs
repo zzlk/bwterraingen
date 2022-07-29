@@ -19,7 +19,7 @@ struct FlatRules {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Cell {
-    stuff: [[isize; 4]; MAX_TILE_IDS],
+    stuff: [[i16; 4]; MAX_TILE_IDS],
     active: BitSet<MAX_TILE_BITS>,
     cached_len: usize,
 }
@@ -27,17 +27,17 @@ struct Cell {
 impl Cell {
     fn new() -> Cell {
         Cell {
-            stuff: [[0isize; 4]; MAX_TILE_IDS],
+            stuff: [[0i16; 4]; MAX_TILE_IDS],
             active: BitSet::new(),
             cached_len: 0,
         }
     }
 
-    fn get(&self, tile: usize) -> &[isize; 4] {
+    fn get(&self, tile: usize) -> &[i16; 4] {
         &self.stuff[tile]
     }
 
-    fn get_mut(&mut self, tile: usize) -> &mut [isize; 4] {
+    fn get_mut(&mut self, tile: usize) -> &mut [i16; 4] {
         &mut self.stuff[tile]
     }
 
@@ -70,7 +70,7 @@ impl Cell {
         self.active.get(tile)
     }
 
-    fn set(&mut self, tile: usize, v: [isize; 4]) {
+    fn set(&mut self, tile: usize, v: [i16; 4]) {
         self.stuff[tile] = v;
     }
 
@@ -146,41 +146,41 @@ impl Wave2 {
         let mut mapping = HashMap::new();
         let mut inverse_mapping = HashMap::new();
 
+        // build up mapping tables, this should contain all keys.
+        for (ordinal, _) in DIRECTIONS.iter().enumerate() {
+            for &tile in rules.ruleset[ordinal].keys() {
+                if !mapping.contains_key(&tile) {
+                    inverse_mapping.insert(mapping.len() as u16, tile);
+                    mapping.insert(tile, mapping.len() as u16);
+                }
+            }
+        }
+
+        // add tiles from template map
+        if let Some((template_map, _mask_tile)) = &template_map_and_mask_tile {
+            for tile in template_map {
+                if !mapping.contains_key(&tile) {
+                    inverse_mapping.insert(mapping.len() as u16, *tile);
+                    mapping.insert(*tile, mapping.len() as u16);
+                }
+            }
+        }
+
         let mut new_rules = [
-            vec![(); MAX_TILE_IDS].into_iter().map(|_| None).collect(),
-            vec![(); MAX_TILE_IDS].into_iter().map(|_| None).collect(),
-            vec![(); MAX_TILE_IDS].into_iter().map(|_| None).collect(),
-            vec![(); MAX_TILE_IDS].into_iter().map(|_| None).collect(),
+            vec![(); mapping.len()].into_iter().map(|_| None).collect(),
+            vec![(); mapping.len()].into_iter().map(|_| None).collect(),
+            vec![(); mapping.len()].into_iter().map(|_| None).collect(),
+            vec![(); mapping.len()].into_iter().map(|_| None).collect(),
         ];
 
         // remap tiles so that they are sequential
         {
-            // build up mapping tables, this should contain all keys.
-            for (ordinal, _) in DIRECTIONS.iter().enumerate() {
-                for &tile in rules.ruleset[ordinal].keys() {
-                    if !mapping.contains_key(&tile) {
-                        inverse_mapping.insert(mapping.len() as u16, tile);
-                        mapping.insert(tile, mapping.len() as u16);
-                    }
-                }
-            }
-
-            // add tiles from template map
-            if let Some((template_map, _mask_tile)) = &template_map_and_mask_tile {
-                for tile in template_map {
-                    if !mapping.contains_key(&tile) {
-                        inverse_mapping.insert(mapping.len() as u16, *tile);
-                        mapping.insert(*tile, mapping.len() as u16);
-                    }
-                }
-            }
-
             // convert rules to dense format
             for (ordinal, _) in DIRECTIONS.iter().enumerate() {
                 let old_rule = &rules.ruleset[ordinal];
                 let new_rule = &mut new_rules[ordinal];
 
-                let mut rule: Vec<_> = vec![(); MAX_TILE_IDS].into_iter().map(|_| None).collect();
+                let mut rule: Vec<_> = vec![(); mapping.len()].into_iter().map(|_| None).collect();
                 for (tile, allowed_tiles) in old_rule {
                     let mut allowed_tiles_remapped = HashSet::new();
                     for allowed_tile in allowed_tiles {
@@ -524,6 +524,7 @@ impl Wave2 {
             }
         }
 
+        backup.shrink_to_fit();
         (contradiction, backup)
     }
 
@@ -578,8 +579,8 @@ impl Wave2 {
         update: &F,
         update_interval: u32,
         _nuke_radius: isize,
-    ) -> Result<Wave2> {
-        update(&self);
+    ) -> Result<()> {
+        update(self);
 
         self.cells.shrink_to_fit();
 
@@ -588,7 +589,6 @@ impl Wave2 {
         let mut deactivations = VecDeque::new();
         let mut indices = VecDeque::new();
 
-        let mut current_wave = self.clone();
         let mut current_indices;
 
         let mut last_time = Instant::now();
@@ -598,7 +598,7 @@ impl Wave2 {
         let mut max_depth = 0;
         let mut times_nuked_at_current_max_depth = 0;
 
-        current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 100000)?;
+        current_indices = self.get_entropy_indices_in_order(&mut rng, 100000)?;
 
         debug!("start main loop");
 
@@ -608,11 +608,11 @@ impl Wave2 {
             if current_index == None {
                 if deactivations.len() == 0 || indices.len() == 0 {
                     error!("No way to unpropagate.");
-                    return anyhow::Ok(current_wave);
+                    return anyhow::Ok(());
                 }
 
                 let deactivated = deactivations.pop_front().unwrap();
-                current_wave.propagate_add_v2(&deactivated);
+                self.propagate_add_v2(&deactivated);
                 // current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
                 current_indices = indices.pop_front().unwrap();
                 continue;
@@ -622,16 +622,16 @@ impl Wave2 {
 
             if Instant::now().duration_since(last_time).as_millis() as u32 > update_interval {
                 last_time = Instant::now();
-                update(&current_wave);
+                update(&self);
             }
 
-            let to_remove = current_wave.choose_removal_set(&mut rng, index);
+            let to_remove = self.choose_removal_set(&mut rng, index);
 
-            let (contradiction, deactivated) = current_wave.propagate_remove(index, &to_remove);
+            let (contradiction, deactivated) = self.propagate_remove(index, &to_remove);
 
             if contradiction {
                 info!("meme");
-                current_wave.propagate_add_v2(&deactivated);
+                self.propagate_add_v2(&deactivated);
                 // current_wave.unpropagate_v2(&propagation_backup);
                 depth -= 1;
 
@@ -654,18 +654,18 @@ impl Wave2 {
                     ) {
                         depth -= 1;
                         let deactivated = deactivations.pop_front().unwrap();
-                        current_wave.propagate_add_v2(&deactivated);
+                        self.propagate_add_v2(&deactivated);
                         // current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
                         indices.pop_front().unwrap();
                     }
 
-                    current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 10)?;
+                    current_indices = self.get_entropy_indices_in_order(&mut rng, 10)?;
                 }
                 continue;
             }
 
-            if current_wave.is_done() {
-                return anyhow::Ok(current_wave);
+            if self.is_done() {
+                return anyhow::Ok(());
             }
 
             depth += 1;
@@ -677,8 +677,9 @@ impl Wave2 {
 
             deactivations.push_front(deactivated);
             indices.push_front(current_indices);
-            current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 2)?;
+            current_indices = self.get_entropy_indices_in_order(&mut rng, 2)?;
 
+            deactivations.shrink_to_fit();
             indices.shrink_to_fit();
         }
     }
