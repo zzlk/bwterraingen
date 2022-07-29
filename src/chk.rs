@@ -1,7 +1,7 @@
 use crate::rules::Rules;
 use anyhow::anyhow;
 use anyhow::Result;
-use hashbrown::HashSet;
+use std::collections::HashSet;
 
 pub fn get_rules_from_chk(chk: &[u8]) -> Result<Rules> {
     let raw_chunks = bwmap::parse_chk(chk);

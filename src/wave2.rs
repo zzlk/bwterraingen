@@ -2,13 +2,13 @@ use crate::bitset::BitSet;
 use crate::rules::Rules;
 use crate::{DIRECTIONS, MAX_TILE_BITS, MAX_TILE_IDS};
 use anyhow::Result;
-use hashbrown::{HashMap, HashSet};
 use instant::Instant;
 use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::{self, Ordering};
 use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use tracing::{debug, error, info};
 
@@ -19,40 +19,43 @@ struct FlatRules {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Cell {
-    stuff: [[usize; 4]; MAX_TILE_IDS],
+    stuff: [[isize; 4]; MAX_TILE_IDS],
     active: HashSet<usize>,
 }
 
 impl Cell {
     fn new() -> Cell {
         Cell {
-            stuff: [[0usize; 4]; MAX_TILE_IDS],
+            stuff: [[0isize; 4]; MAX_TILE_IDS],
             active: HashSet::new(),
         }
     }
 
-    fn get(&self, tile: usize) -> &[usize; 4] {
+    fn get(&self, tile: usize) -> &[isize; 4] {
         &self.stuff[tile]
     }
 
-    fn get_mut(&mut self, tile: usize) -> &mut [usize; 4] {
+    fn get_mut(&mut self, tile: usize) -> &mut [isize; 4] {
         &mut self.stuff[tile]
     }
 
-    fn get_unchecked_mut(&mut self, tile: usize) -> &mut [usize; 4] {
+    fn get_unchecked_mut(&mut self, tile: usize) -> &mut [isize; 4] {
         unsafe { self.stuff.get_unchecked_mut(tile) }
     }
 
-    fn remove(&mut self, tile: usize) {
+    fn deactivate(&mut self, tile: usize) {
         self.active.remove(&tile);
+    }
+
+    fn activate(&mut self, tile: usize) {
+        self.active.insert(tile);
     }
 
     fn is_active(&self, tile: usize) -> bool {
         self.active.contains(&tile)
     }
 
-    fn set(&mut self, tile: usize, v: [usize; 4]) {
-        self.active.insert(tile);
+    fn set(&mut self, tile: usize, v: [isize; 4]) {
         self.stuff[tile] = v;
     }
 
@@ -77,7 +80,7 @@ impl Cell {
 }
 
 impl<'a> IntoIterator for &'a Cell {
-    type Item = (u16, [usize; 4]);
+    type Item = (u16, [isize; 4]);
     type IntoIter = CellIterator<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -94,7 +97,7 @@ struct CellIterator<'a> {
 }
 
 impl<'a> Iterator for CellIterator<'a> {
-    type Item = (u16, [usize; 4]);
+    type Item = (u16, [isize; 4]);
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.tile < self.parent.stuff.len() {
@@ -189,7 +192,8 @@ impl Wave2 {
 
         // Calculate the kind of 'all-tiles' cell
         for tile in inverse_mapping.keys() {
-            example_cell.set(*tile as usize, [0, 0, 0, 0])
+            example_cell.set(*tile as usize, [0, 0, 0, 0]);
+            example_cell.activate(*tile as usize);
         }
 
         let mut wave = Wave2 {
@@ -200,27 +204,35 @@ impl Wave2 {
             inverse_mapping: Rc::new(inverse_mapping),
         };
 
-        // Set tiles based on template
+        // Deactivate masked out tiles.
         if let Some((template_map, mask_tile)) = &template_map_and_mask_tile {
             for y in 0..height {
                 for x in 0..width {
                     let index = (x + y * width) as usize;
 
                     if template_map[index] != *mask_tile {
-                        wave.cells[index] = Cell::new();
-                        wave.cells[index].set(mapping[&template_map[index]] as usize, [0, 0, 0, 0]);
+                        let other_tiles: Vec<_> = wave.cells[index]
+                            .iter()
+                            .filter(|x| x.0 != mapping[&template_map[index]])
+                            .map(|x| x.0)
+                            .collect();
+                        for tile in other_tiles {
+                            wave.cells[index].deactivate(tile as usize);
+                        }
                     }
                 }
             }
         }
 
         // calculate support of every tile
-        for target_y in 0..wave.height {
-            for target_x in 0..wave.width {
-                let index = (target_x + target_y * wave.width) as usize;
+        {
+            let all_tiles = wave.inverse_mapping.keys().cloned().collect();
+            for target_y in 0..wave.height {
+                for target_x in 0..wave.width {
+                    let index = (target_x + target_y * wave.width) as usize;
 
-                let tiles: HashSet<_> = wave.cells[index].iter().map(|x| x.0).collect();
-                wave.calculate_support(index, &tiles);
+                    wave.calculate_support(index, &all_tiles);
+                }
             }
         }
 
@@ -232,6 +244,7 @@ impl Wave2 {
 
                 if let Some((template_map, mask_tile)) = &template_map_and_mask_tile {
                     if template_map[index] != *mask_tile {
+                        println!("memes");
                         continue;
                     }
                 }
@@ -262,7 +275,10 @@ impl Wave2 {
 
         // remove unsupported tiles
         for (index, tiles) in unsupported_tiles {
-            wave.propagate_remove(index, &tiles);
+            let (contradiction, _) = wave.propagate_remove(index, &tiles);
+            if contradiction {
+                panic!("wave is unsatisfiable.");
+            }
         }
 
         wave
@@ -305,12 +321,6 @@ impl Wave2 {
         true
     }
 
-    pub fn unpropagate_v2(&mut self, propagation_backups: &HashMap<(usize, u16), [usize; 4]>) {
-        for ((index, tile), pb) in propagation_backups {
-            self.cells[*index].set(*tile as usize, *pb);
-        }
-    }
-
     fn calculate_support(&mut self, index: usize, tiles: &HashSet<u16>) {
         let target_x = index as isize % self.width;
         let target_y = index as isize / self.width;
@@ -343,11 +353,41 @@ impl Wave2 {
         }
     }
 
+    pub fn propagate_add_v2(&mut self, deactivations: &Vec<(usize, u16)>) {
+        let mut checker = HashMap::new();
+        for (index, tile) in deactivations {
+            assert!(checker.entry(index).or_insert(HashSet::new()).insert(tile));
+            assert!(!self.cells[*index].is_active(*tile as usize));
+            self.cells[*index].activate(*tile as usize);
+
+            let source_x = *index as isize % self.width;
+            let source_y = *index as isize / self.width;
+
+            for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
+                let target_x = source_x + direction.0;
+                let target_y = source_y + direction.1;
+
+                if target_x < 0 || target_x >= self.width || target_y < 0 || target_y >= self.height
+                {
+                    continue;
+                }
+
+                let target_index = (target_x + target_y * self.width) as usize;
+
+                if let Some(ruleset) = &self.rules.ruleset[ordinal][*tile as usize] {
+                    for allowed_tile in ruleset {
+                        self.cells[target_index].get_mut(*allowed_tile as usize)[ordinal] += 1;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn propagate_remove(
         &mut self,
         start: usize,
         to_remove: &HashSet<u16>,
-    ) -> (Option<usize>, HashMap<(usize, u16), [usize; 4]>) {
+    ) -> (bool, Vec<(usize, u16)>) {
         #[derive(Clone, Eq, PartialEq, Debug)]
         struct Node {
             target_index: usize,
@@ -366,21 +406,25 @@ impl Wave2 {
             }
         }
 
+        let mut contradiction = false;
+
         let rules = self.rules.clone();
 
         let mut pq = Vec::<Node>::new();
 
-        let mut backup = HashMap::with_capacity(to_remove.len() * 10);
+        let mut backup = Vec::new();
 
         let mut removed = Vec::new();
         for tile in to_remove {
             if self.cells[start].is_active(*tile as usize) {
-                if !backup.contains_key(&(start, *tile)) {
-                    backup.insert((start, *tile), *self.cells[start].get(*tile as usize));
-                }
-                self.cells[start].remove(*tile as usize);
+                backup.push((start, *tile));
+                self.cells[start].deactivate(*tile as usize);
                 removed.push(*tile);
             }
+        }
+
+        if self.cells[start].len() == 0 {
+            contradiction = true;
         }
 
         pq.push(Node {
@@ -426,32 +470,20 @@ impl Wave2 {
                     }
 
                     if let Some(rule) = &rules.ruleset[ordinal][*removed_tile as usize] {
-                        // info!(
-                        //     "target_x: {}, target_y: {}, ordinal: {}, &chosen.removed: {}, rule.len: {}, target_cell.len(): {}",
-                        //     target_x,
-                        //     target_y,
-                        //     ordinal,
-                        //     chosen.removed.len(),
-                        //     rule.len(),
-                        //     target_cell.cached_len
-                        // );
                         for allowed_tile in rule {
-                            if target_cell.is_active(*allowed_tile as usize) {
-                                let support = target_cell.get_unchecked_mut(*allowed_tile as usize);
-                                backup
-                                    .entry((target_index, *allowed_tile))
-                                    .or_insert(*support);
+                            let is_active = target_cell.is_active(*allowed_tile as usize);
+                            let support = target_cell.get_unchecked_mut(*allowed_tile as usize);
+                            support[ordinal] -= 1;
 
-                                support[ordinal] -= 1;
+                            assert!(support[ordinal] >= 0);
 
-                                if support[ordinal] == 0 {
-                                    target_cell.remove(*allowed_tile as usize);
-                                    newly_removed_tiles.push(*allowed_tile);
+                            if is_active && support[ordinal] <= 0 {
+                                target_cell.deactivate(*allowed_tile as usize);
+                                backup.push((target_index, *allowed_tile));
+                                newly_removed_tiles.push(*allowed_tile);
 
-                                    if target_cell.len() == 0 {
-                                        backup.shrink_to_fit();
-                                        return (Some(target_index), backup);
-                                    }
+                                if target_cell.len() == 0 {
+                                    contradiction = true;
                                 }
                             }
                         }
@@ -480,11 +512,7 @@ impl Wave2 {
             }
         }
 
-        // info!("post-propagate");
-        // self.print_wave();
-
-        backup.shrink_to_fit();
-        (None, backup)
+        (contradiction, backup)
     }
 
     pub fn get_entropy_indices_in_order(
@@ -545,7 +573,7 @@ impl Wave2 {
 
         let mut rng = rand::thread_rng();
 
-        let mut propagation_backups = VecDeque::new();
+        let mut deactivations = VecDeque::new();
         let mut indices = VecDeque::new();
 
         let mut current_wave = self.clone();
@@ -563,20 +591,22 @@ impl Wave2 {
         debug!("start main loop");
 
         loop {
-            while propagation_backups.len() > 600 {
+            while deactivations.len() > 600 {
+                deactivations.pop_back();
                 indices.pop_back();
-                propagation_backups.pop_back();
             }
 
             let current_index = current_indices.pop();
 
             if current_index == None {
-                if propagation_backups.len() == 0 || indices.len() == 0 {
+                if deactivations.len() == 0 || indices.len() == 0 {
                     error!("No way to unpropagate.");
-                    return anyhow::Ok(current_wave.clone());
+                    return anyhow::Ok(current_wave);
                 }
 
-                current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
+                let deactivated = deactivations.pop_front().unwrap();
+                current_wave.propagate_add_v2(&deactivated);
+                // current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
                 current_indices = indices.pop_front().unwrap();
                 continue;
             }
@@ -590,11 +620,12 @@ impl Wave2 {
 
             let to_remove = current_wave.choose_removal_set(&mut rng, index);
 
-            let (failed_at, propagation_backup) = current_wave.propagate_remove(index, &to_remove);
+            let (contradiction, deactivated) = current_wave.propagate_remove(index, &to_remove);
 
-            if let Some(_) = failed_at {
-                // self.unpropagate(index, &to_remove);
-                current_wave.unpropagate_v2(&propagation_backup);
+            if contradiction {
+                info!("meme");
+                current_wave.propagate_add_v2(&deactivated);
+                // current_wave.unpropagate_v2(&propagation_backup);
                 depth -= 1;
 
                 // let failed_x = failed_at as isize % self.width;
@@ -612,10 +643,12 @@ impl Wave2 {
 
                     for _ in 0..std::cmp::min(
                         times_nuked_at_current_max_depth * times_nuked_at_current_max_depth,
-                        propagation_backups.len(),
+                        deactivations.len(),
                     ) {
                         depth -= 1;
-                        current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
+                        let deactivated = deactivations.pop_front().unwrap();
+                        current_wave.propagate_add_v2(&deactivated);
+                        // current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
                         indices.pop_front().unwrap();
                     }
 
@@ -625,7 +658,7 @@ impl Wave2 {
             }
 
             if current_wave.is_done() {
-                return anyhow::Ok(current_wave.clone());
+                return anyhow::Ok(current_wave);
             }
 
             depth += 1;
@@ -635,12 +668,11 @@ impl Wave2 {
                 max_depth = depth;
             }
 
-            propagation_backups.push_front(propagation_backup);
+            deactivations.push_front(deactivated);
             indices.push_front(current_indices);
             current_indices = current_wave.get_entropy_indices_in_order(&mut rng, 2)?;
 
             indices.shrink_to_fit();
-            propagation_backups.shrink_to_fit();
         }
     }
 }
@@ -745,11 +777,11 @@ mod test {
     #[quickcheck]
     fn quickcheck_testcase(
         index: BoundedInt<0, { 4 * 4 }>,
-        wave_width: BoundedInt<1, 4>,
-        wave_height: BoundedInt<1, 4>,
-        rule_width: BoundedInt<4, 8>,
-        rule_height: BoundedInt<4, 8>,
-        ruledata: Vec<u16>,
+        wave_width: BoundedInt<1, 3>,
+        wave_height: BoundedInt<1, 3>,
+        rule_width: BoundedInt<3, 8>,
+        rule_height: BoundedInt<3, 8>,
+        ruledata: Vec<BoundedInt<0, 4>>,
     ) -> TestResult {
         if ruledata.len() < rule_width.0 * rule_height.0 {
             return TestResult::discard();
@@ -766,7 +798,7 @@ mod test {
         let rules = Rules::new(
             rule_width.0 as isize,
             rule_height.0 as isize,
-            &ruledata,
+            &ruledata.iter().map(|x| x.0 as u16).collect(),
             &HashSet::new(),
             0,
         );
@@ -778,13 +810,54 @@ mod test {
         to_remove.insert(wave.cells[index.0].iter().next().unwrap().0 as u16);
 
         let mut new_wave = wave.clone();
-        let (s, pb) = new_wave.propagate_remove(index.0, &to_remove);
-        if s.is_none() {
-            assert_ne!(wave.cells, new_wave.cells);
-            new_wave.unpropagate_v2(&pb);
-            assert_eq!(wave.cells, new_wave.cells);
-        }
+        // let (s, pb) = new_wave.propagate_remove(index.0, &to_remove);
+        let (_contradiction, deactivations) = new_wave.propagate_remove(index.0, &to_remove);
+        // if s.is_none() {
+        // assert_ne!(wave.cells, new_wave.cells);
+        // new_wave.unpropagate_v2(&pb);
+        // assert_eq!(wave.cells, new_wave.cells);
+        new_wave.propagate_add_v2(&deactivations);
+        assert_eq!(wave.cells, new_wave.cells);
+        // }
 
         TestResult::passed()
+    }
+
+    #[test]
+    fn sadfsadfsdf() {
+        #[rustfmt::skip]
+        let rules = Rules::new(
+            2,
+            2,
+            &vec![
+                0, 1,
+                2, 3,
+            ],
+            &HashSet::new(),
+            0,
+        );
+
+        #[rustfmt::skip]
+        let wave = Wave2::new(2 as isize, 2 as isize, &rules, Some((vec![
+            4, 1,
+            2, 3], 4)));
+
+        let mut to_remove = HashSet::new();
+
+        let remove_index = 0;
+
+        assert!(wave.cells[remove_index].len() > 0);
+        to_remove.insert(wave.cells[remove_index].iter().next().unwrap().0 as u16);
+
+        let mut new_wave = wave.clone();
+        // let (s, pb) = new_wave.propagate_remove(index.0, &to_remove);
+        let (_contradiction, deactivations) = new_wave.propagate_remove(remove_index, &to_remove);
+        // if s.is_none() {
+        // assert_ne!(wave.cells, new_wave.cells);
+        // new_wave.unpropagate_v2(&pb);
+        // assert_eq!(wave.cells, new_wave.cells);
+        new_wave.propagate_add_v2(&deactivations);
+        assert_eq!(wave.cells, new_wave.cells);
+        // }
     }
 }
