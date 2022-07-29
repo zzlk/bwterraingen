@@ -39,33 +39,6 @@ fn calculate_support_internal(
     support
 }
 
-//     for source_tile in src_tiles.iter() {
-//         if let Some(rule) = rules.ruleset[ordinal][source_tile as usize] {
-//             for allowed_tile in rule {
-//                 if tiles.contains(allowed_tile) {
-//                     support[*allowed_tile as usize] += 1;
-//                 }
-//             }
-//         }
-//     }
-
-//     support
-
-//                 // for source_tile in &src_tiles {
-//             //     if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
-//             //         for allowed_tile in rule {
-//             //             if tiles.get(*allowed_tile as usize) {
-//             //                 unsafe {
-//             //                     self.cells
-//             //                         .get_unchecked_mut(target_index)
-//             //                         .increment_unchecked(*allowed_tile as usize, ordinal);
-//             //                 }
-//             //             }
-//             //         }
-//             //     }
-//             // }
-// }
-
 #[derive(Debug)]
 struct FlatRules {
     ruleset: [Vec<Option<Vec<u16>>>; 4],
@@ -160,39 +133,6 @@ impl Cell {
         self.active.iter()
     }
 }
-
-// impl<'a> IntoIterator for &'a Cell {
-//     type Item = (u16, [isize; 4]);
-//     type IntoIter = CellIterator<'a>;
-
-//     fn into_iter(self) -> Self::IntoIter {
-//         CellIterator {
-//             tile: 0,
-//             parent: self,
-//         }
-//     }
-// }
-
-// struct CellIterator<'a> {
-//     tile: usize,
-//     parent: &'a Cell,
-// }
-
-// impl<'a> Iterator for CellIterator<'a> {
-//     type Item = (u16, [isize; 4]);
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         while self.tile < self.parent.stuff.len() {
-//             self.tile += 1;
-
-//             if self.parent.is_active(self.tile - 1) {
-//                 return Some(((self.tile - 1) as u16, self.parent.stuff[self.tile - 1]));
-//             }
-//         }
-
-//         None
-//     }
-// }
 
 #[derive(Debug, Clone)]
 pub struct Wave2 {
@@ -435,41 +375,11 @@ impl Wave2 {
             {
                 self.cells[target_index].get_mut(tile_id)[ordinal] = *support as i16;
             }
-
-            // for source_tile in &src_tiles {
-            //     if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
-            //         for allowed_tile in rule {
-            //             if tiles.get(*allowed_tile as usize) {
-            //                 unsafe {
-            //                     self.cells
-            //                         .get_unchecked_mut(target_index)
-            //                         .increment_unchecked(*allowed_tile as usize, ordinal);
-            //                 }
-            //             }
-            //         }
-            //     }
-            // }
         }
-
-        //self.cells[target_index].stuff = calculate_support_internal(src_tiles, rules, tiles);
-
-        // for source_tile in &src_tiles {
-        //     if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
-        //         for allowed_tile in rule {
-        //             if tiles.get(*allowed_tile as usize) {
-        //                 unsafe {
-        //                     self.cells
-        //                         .get_unchecked_mut(target_index)
-        //                         .increment_unchecked(*allowed_tile as usize, ordinal);
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
     }
 
     #[instrument(skip_all)]
-    pub fn propagate_add_v2(&mut self, deactivations: &Vec<(usize, u16)>) {
+    pub fn propagate_add(&mut self, deactivations: &Vec<(usize, u16)>) {
         for (index, tile) in deactivations {
             assert!(!self.cells[*index].is_active(*tile as usize));
             self.cells[*index].activate(*tile as usize);
@@ -718,7 +628,7 @@ impl Wave2 {
                 }
 
                 let deactivated = deactivations.pop_front().unwrap();
-                self.propagate_add_v2(&deactivated);
+                self.propagate_add(&deactivated);
                 // current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
                 current_indices = indices.pop_front().unwrap();
                 continue;
@@ -736,7 +646,7 @@ impl Wave2 {
             let (contradiction, deactivated) = self.propagate_remove(index, &to_remove);
 
             if contradiction {
-                self.propagate_add_v2(&deactivated);
+                self.propagate_add(&deactivated);
                 // current_wave.unpropagate_v2(&propagation_backup);
                 depth -= 1;
 
@@ -759,7 +669,7 @@ impl Wave2 {
                     ) {
                         depth -= 1;
                         let deactivated = deactivations.pop_front().unwrap();
-                        self.propagate_add_v2(&deactivated);
+                        self.propagate_add(&deactivated);
                         current_indices = indices.pop_front().unwrap();
                     }
                 }
@@ -926,7 +836,7 @@ mod test {
         // assert_ne!(wave.cells, new_wave.cells);
         // new_wave.unpropagate_v2(&pb);
         // assert_eq!(wave.cells, new_wave.cells);
-        new_wave.propagate_add_v2(&deactivations);
+        new_wave.propagate_add(&deactivations);
         assert_eq!(wave.cells, new_wave.cells);
         // }
 
@@ -966,8 +876,7 @@ mod test {
         // assert_ne!(wave.cells, new_wave.cells);
         // new_wave.unpropagate_v2(&pb);
         // assert_eq!(wave.cells, new_wave.cells);
-        new_wave.propagate_add_v2(&deactivations);
+        new_wave.propagate_add(&deactivations);
         assert_eq!(wave.cells, new_wave.cells);
-        // }
     }
 }
