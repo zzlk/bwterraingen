@@ -10,7 +10,7 @@ use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::{self, Ordering};
 use std::collections::VecDeque;
 use std::rc::Rc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, instrument};
 
 #[derive(Debug)]
 struct FlatRules {
@@ -41,16 +41,28 @@ impl Cell {
         &mut self.stuff[tile]
     }
 
+    #[inline(always)]
     fn decrement_unchecked(&mut self, tile: usize, ordinal: usize) -> bool {
         unsafe {
-            self.stuff.get_unchecked_mut(tile)[ordinal] -= 1;
-            self.stuff.get_unchecked_mut(tile)[ordinal] == 0
+            *self
+                .stuff
+                .get_unchecked_mut(tile)
+                .get_unchecked_mut(ordinal) -= 1;
+            *self
+                .stuff
+                .get_unchecked_mut(tile)
+                .get_unchecked_mut(ordinal)
+                == 0
         }
     }
 
+    #[inline(always)]
     fn increment_unchecked(&mut self, tile: usize, ordinal: usize) {
         unsafe {
-            self.stuff.get_unchecked_mut(tile)[ordinal] += 1;
+            *self
+                .stuff
+                .get_unchecked_mut(tile)
+                .get_unchecked_mut(ordinal) += 1;
         }
     }
 
@@ -66,6 +78,7 @@ impl Cell {
         }
     }
 
+    #[inline(always)]
     fn is_active(&self, tile: usize) -> bool {
         self.active.get(tile)
     }
@@ -137,6 +150,7 @@ pub struct Wave2 {
 }
 
 impl Wave2 {
+    #[instrument(skip_all)]
     pub fn new(
         width: isize,
         height: isize,
@@ -182,13 +196,12 @@ impl Wave2 {
 
                 let mut rule: Vec<_> = vec![(); mapping.len()].into_iter().map(|_| None).collect();
                 for (tile, allowed_tiles) in old_rule {
-                    let mut allowed_tiles_remapped = HashSet::new();
+                    let mut allowed_tiles_remapped = Vec::new();
                     for allowed_tile in allowed_tiles {
-                        allowed_tiles_remapped.insert(mapping[allowed_tile]);
+                        allowed_tiles_remapped.push(mapping[allowed_tile]);
                     }
-                    let mut v: Vec<_> = allowed_tiles_remapped.drain().collect();
-                    v.sort_unstable();
-                    rule[mapping[tile] as usize] = Some(v);
+                    allowed_tiles_remapped.sort_unstable();
+                    rule[mapping[tile] as usize] = Some(allowed_tiles_remapped);
                 }
 
                 *new_rule = rule;
@@ -335,6 +348,7 @@ impl Wave2 {
         true
     }
 
+    #[instrument(skip_all)]
     fn calculate_support(&mut self, index: usize, tiles: &HashSet<u16>) {
         let target_x = index as isize % self.width;
         let target_y = index as isize / self.width;
@@ -359,7 +373,11 @@ impl Wave2 {
                 if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
                     for allowed_tile in rule {
                         if tiles.contains(allowed_tile) {
-                            self.cells[target_index].get_mut(*allowed_tile as usize)[ordinal] += 1;
+                            unsafe {
+                                self.cells
+                                    .get_unchecked_mut(target_index)
+                                    .increment_unchecked(*allowed_tile as usize, ordinal);
+                            }
                         }
                     }
                 }
@@ -367,6 +385,7 @@ impl Wave2 {
         }
     }
 
+    #[instrument(skip_all)]
     pub fn propagate_add_v2(&mut self, deactivations: &Vec<(usize, u16)>) {
         for (index, tile) in deactivations {
             assert!(!self.cells[*index].is_active(*tile as usize));
@@ -396,6 +415,7 @@ impl Wave2 {
         }
     }
 
+    #[instrument(skip_all)]
     pub fn propagate_remove(
         &mut self,
         start: usize,
@@ -528,6 +548,7 @@ impl Wave2 {
         (contradiction, backup)
     }
 
+    #[instrument(skip_all)]
     pub fn get_entropy_indices_in_order(
         &self,
         mut rng: &mut ThreadRng,
@@ -554,6 +575,7 @@ impl Wave2 {
         anyhow::Ok(entropies)
     }
 
+    #[instrument(skip_all)]
     pub fn choose_removal_set(&self, mut rng: &mut ThreadRng, index: usize) -> HashSet<u16> {
         if self.cells[index].len() <= 1 {
             panic!("can't collapse this one.");
@@ -574,6 +596,7 @@ impl Wave2 {
         hs
     }
 
+    #[instrument(skip_all)]
     pub fn logical_conclusion<F: Fn(&Wave2)>(
         &mut self,
         update: &F,
@@ -630,7 +653,6 @@ impl Wave2 {
             let (contradiction, deactivated) = self.propagate_remove(index, &to_remove);
 
             if contradiction {
-                info!("meme");
                 self.propagate_add_v2(&deactivated);
                 // current_wave.unpropagate_v2(&propagation_backup);
                 depth -= 1;
@@ -642,7 +664,7 @@ impl Wave2 {
 
                 failures_at_current_max_depth += 1;
 
-                if failures_at_current_max_depth > 32 {
+                if failures_at_current_max_depth > 16 {
                     failures_at_current_max_depth = 0;
                     times_nuked_at_current_max_depth += 1;
 
@@ -655,11 +677,8 @@ impl Wave2 {
                         depth -= 1;
                         let deactivated = deactivations.pop_front().unwrap();
                         self.propagate_add_v2(&deactivated);
-                        // current_wave.unpropagate_v2(&propagation_backups.pop_front().unwrap());
-                        indices.pop_front().unwrap();
+                        current_indices = indices.pop_front().unwrap();
                     }
-
-                    current_indices = self.get_entropy_indices_in_order(&mut rng, 10)?;
                 }
                 continue;
             }
