@@ -591,11 +591,6 @@ impl Wave2 {
         debug!("start main loop");
 
         loop {
-            while deactivations.len() > 600 {
-                deactivations.pop_back();
-                indices.pop_back();
-            }
-
             let current_index = current_indices.pop();
 
             if current_index == None {
