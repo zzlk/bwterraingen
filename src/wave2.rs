@@ -21,6 +21,7 @@ struct FlatRules {
 struct Cell {
     stuff: [[isize; 4]; MAX_TILE_IDS],
     active: BitSet<MAX_TILE_BITS>,
+    cached_len: usize,
 }
 
 impl Cell {
@@ -28,6 +29,7 @@ impl Cell {
         Cell {
             stuff: [[0isize; 4]; MAX_TILE_IDS],
             active: BitSet::new(),
+            cached_len: 0,
         }
     }
 
@@ -46,12 +48,22 @@ impl Cell {
         }
     }
 
+    fn increment_unchecked(&mut self, tile: usize, ordinal: usize) {
+        unsafe {
+            self.stuff.get_unchecked_mut(tile)[ordinal] += 1;
+        }
+    }
+
     fn deactivate(&mut self, tile: usize) {
-        self.active.remove(tile);
+        if self.active.remove(tile) {
+            self.cached_len -= 1;
+        }
     }
 
     fn activate(&mut self, tile: usize) {
-        self.active.insert(tile);
+        if self.active.insert(tile) {
+            self.cached_len += 1;
+        }
     }
 
     fn is_active(&self, tile: usize) -> bool {
@@ -63,7 +75,7 @@ impl Cell {
     }
 
     fn len(&self) -> usize {
-        self.active.len()
+        self.cached_len
     }
 
     fn get_singular(&self) -> u16 {
@@ -353,9 +365,7 @@ impl Wave2 {
     }
 
     pub fn propagate_add_v2(&mut self, deactivations: &Vec<(usize, u16)>) {
-        let mut checker = HashMap::new();
         for (index, tile) in deactivations {
-            assert!(checker.entry(index).or_insert(HashSet::new()).insert(tile));
             assert!(!self.cells[*index].is_active(*tile as usize));
             self.cells[*index].activate(*tile as usize);
 
@@ -375,7 +385,8 @@ impl Wave2 {
 
                 if let Some(ruleset) = &self.rules.ruleset[ordinal][*tile as usize] {
                     for allowed_tile in ruleset {
-                        self.cells[target_index].get_mut(*allowed_tile as usize)[ordinal] += 1;
+                        self.cells[target_index]
+                            .increment_unchecked(*allowed_tile as usize, ordinal);
                     }
                 }
             }
@@ -470,17 +481,18 @@ impl Wave2 {
 
                     if let Some(rule) = &rules.ruleset[ordinal][*removed_tile as usize] {
                         for allowed_tile in rule {
-                            let is_active = target_cell.is_active(*allowed_tile as usize);
                             let support_went_to_zero =
                                 target_cell.decrement_unchecked(*allowed_tile as usize, ordinal);
 
-                            if is_active && support_went_to_zero {
-                                target_cell.deactivate(*allowed_tile as usize);
-                                backup.push((target_index, *allowed_tile));
-                                newly_removed_tiles.push(*allowed_tile);
+                            if support_went_to_zero {
+                                if target_cell.is_active(*allowed_tile as usize) {
+                                    target_cell.deactivate(*allowed_tile as usize);
+                                    backup.push((target_index, *allowed_tile));
+                                    newly_removed_tiles.push(*allowed_tile);
 
-                                if target_cell.len() == 0 {
-                                    contradiction = true;
+                                    if target_cell.len() == 0 {
+                                        contradiction = true;
+                                    }
                                 }
                             }
                         }
