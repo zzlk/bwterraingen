@@ -2,13 +2,13 @@ use crate::bitset::BitSet;
 use crate::rules::Rules;
 use crate::{DIRECTIONS, MAX_TILE_BITS, MAX_TILE_IDS};
 use anyhow::Result;
+use hashbrown::{HashMap, HashSet};
 use instant::Instant;
 use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
 use std::cmp::{self, Ordering};
 use std::collections::VecDeque;
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use tracing::{debug, error, info};
 
@@ -39,8 +39,11 @@ impl Cell {
         &mut self.stuff[tile]
     }
 
-    fn get_unchecked_mut(&mut self, tile: usize) -> &mut [isize; 4] {
-        unsafe { self.stuff.get_unchecked_mut(tile) }
+    fn decrement_unchecked(&mut self, tile: usize, ordinal: usize) -> bool {
+        unsafe {
+            self.stuff.get_unchecked_mut(tile)[ordinal] -= 1;
+            self.stuff.get_unchecked_mut(tile)[ordinal] == 0
+        }
     }
 
     fn deactivate(&mut self, tile: usize) {
@@ -472,12 +475,10 @@ impl Wave2 {
                     if let Some(rule) = &rules.ruleset[ordinal][*removed_tile as usize] {
                         for allowed_tile in rule {
                             let is_active = target_cell.is_active(*allowed_tile as usize);
-                            let support = target_cell.get_unchecked_mut(*allowed_tile as usize);
-                            support[ordinal] -= 1;
+                            let support_went_to_zero =
+                                target_cell.decrement_unchecked(*allowed_tile as usize, ordinal);
 
-                            assert!(support[ordinal] >= 0);
-
-                            if is_active && support[ordinal] <= 0 {
+                            if is_active && support_went_to_zero {
                                 target_cell.deactivate(*allowed_tile as usize);
                                 backup.push((target_index, *allowed_tile));
                                 newly_removed_tiles.push(*allowed_tile);

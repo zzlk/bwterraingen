@@ -1,8 +1,8 @@
 use crate::DIRECTIONS;
 use anyhow::Result;
+use hashbrown::{HashMap, HashSet};
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
 use tracing::info;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
