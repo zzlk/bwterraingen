@@ -73,6 +73,21 @@ impl<const N: usize> BitSet<N> {
     }
 }
 
+impl<const N: usize> FromIterator<usize> for BitSet<N> {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = usize>,
+    {
+        let mut bs = BitSet::new();
+
+        for item in iter {
+            bs.insert(item);
+        }
+
+        bs
+    }
+}
+
 pub struct BitSetIterator<'a, const N: usize> {
     bitset: &'a BitSet<N>,
     bit_index: usize,

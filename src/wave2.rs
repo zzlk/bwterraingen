@@ -2,6 +2,7 @@ use crate::bitset::{BitSet, BitSetIterator};
 use crate::rules::Rules;
 use crate::{DIRECTIONS, MAX_TILE_BITS, MAX_TILE_IDS};
 use anyhow::Result;
+use cached::proc_macro::cached;
 use hashbrown::{HashMap, HashSet};
 use instant::Instant;
 use rand::distributions::Uniform;
@@ -11,6 +12,59 @@ use std::cmp::{self, Ordering};
 use std::collections::VecDeque;
 use std::rc::Rc;
 use tracing::{debug, error, info, instrument};
+
+#[cached(
+    key = "(BitSet<MAX_TILE_BITS>, BitSet<MAX_TILE_BITS>, usize)",
+    convert = r#"{ (*src_tiles, *tiles, ordinal) }"#,
+    size = 1000
+)]
+fn calculate_support_internal(
+    src_tiles: &BitSet<MAX_TILE_BITS>,
+    tiles: &BitSet<MAX_TILE_BITS>,
+    ordinal: usize,
+    rules: &FlatRules,
+) -> [usize; MAX_TILE_IDS] {
+    let mut support = [0; MAX_TILE_IDS];
+
+    for src_tile in src_tiles {
+        if let Some(rule) = &rules.ruleset[ordinal][src_tile as usize] {
+            for allowed_tile in rule {
+                if tiles.get(*allowed_tile as usize) {
+                    support[*allowed_tile as usize] += 1;
+                }
+            }
+        }
+    }
+
+    support
+}
+
+//     for source_tile in src_tiles.iter() {
+//         if let Some(rule) = rules.ruleset[ordinal][source_tile as usize] {
+//             for allowed_tile in rule {
+//                 if tiles.contains(allowed_tile) {
+//                     support[*allowed_tile as usize] += 1;
+//                 }
+//             }
+//         }
+//     }
+
+//     support
+
+//                 // for source_tile in &src_tiles {
+//             //     if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
+//             //         for allowed_tile in rule {
+//             //             if tiles.get(*allowed_tile as usize) {
+//             //                 unsafe {
+//             //                     self.cells
+//             //                         .get_unchecked_mut(target_index)
+//             //                         .increment_unchecked(*allowed_tile as usize, ordinal);
+//             //                 }
+//             //             }
+//             //         }
+//             //     }
+//             // }
+// }
 
 #[derive(Debug)]
 struct FlatRules {
@@ -253,7 +307,12 @@ impl Wave2 {
 
         // calculate support of every tile
         {
-            let all_tiles = wave.inverse_mapping.keys().cloned().collect();
+            let all_tiles: BitSet<MAX_TILE_BITS> = wave
+                .inverse_mapping
+                .keys()
+                .cloned()
+                .map(|x| x as usize)
+                .collect();
             for target_y in 0..wave.height {
                 for target_x in 0..wave.width {
                     let index = (target_x + target_y * wave.width) as usize;
@@ -348,14 +407,13 @@ impl Wave2 {
         true
     }
 
-    #[instrument(skip_all)]
-    fn calculate_support(&mut self, index: usize, tiles: &HashSet<u16>) {
+    fn calculate_support(&mut self, index: usize, tiles: &BitSet<MAX_TILE_BITS>) {
         let target_x = index as isize % self.width;
         let target_y = index as isize / self.width;
         let target_index = (target_x + target_y * self.width) as usize;
 
         for tile in tiles {
-            self.cells[target_index].set(*tile as usize, [0, 0, 0, 0]);
+            self.cells[target_index].set(tile as usize, [0, 0, 0, 0]);
         }
 
         for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
@@ -368,21 +426,46 @@ impl Wave2 {
 
             let source_index = (source_x + source_y * self.width) as usize;
 
-            let source_tiles: Vec<_> = self.cells[source_index].iter().collect();
-            for source_tile in source_tiles {
-                if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
-                    for allowed_tile in rule {
-                        if tiles.contains(allowed_tile) {
-                            unsafe {
-                                self.cells
-                                    .get_unchecked_mut(target_index)
-                                    .increment_unchecked(*allowed_tile as usize, ordinal);
-                            }
-                        }
-                    }
-                }
+            let src_tiles: BitSet<MAX_TILE_BITS> = self.cells[source_index].iter().collect();
+
+            for (tile_id, support) in
+                calculate_support_internal(&src_tiles, tiles, ordinal, &self.rules)
+                    .iter()
+                    .enumerate()
+            {
+                self.cells[target_index].get_mut(tile_id)[ordinal] = *support as i16;
             }
+
+            // for source_tile in &src_tiles {
+            //     if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
+            //         for allowed_tile in rule {
+            //             if tiles.get(*allowed_tile as usize) {
+            //                 unsafe {
+            //                     self.cells
+            //                         .get_unchecked_mut(target_index)
+            //                         .increment_unchecked(*allowed_tile as usize, ordinal);
+            //                 }
+            //             }
+            //         }
+            //     }
+            // }
         }
+
+        //self.cells[target_index].stuff = calculate_support_internal(src_tiles, rules, tiles);
+
+        // for source_tile in &src_tiles {
+        //     if let Some(rule) = &self.rules.ruleset[ordinal][source_tile as usize] {
+        //         for allowed_tile in rule {
+        //             if tiles.get(*allowed_tile as usize) {
+        //                 unsafe {
+        //                     self.cells
+        //                         .get_unchecked_mut(target_index)
+        //                         .increment_unchecked(*allowed_tile as usize, ordinal);
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
     }
 
     #[instrument(skip_all)]
