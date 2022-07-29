@@ -226,7 +226,10 @@ impl Wave2 {
                     let index = (x + y * width) as usize;
 
                     if template_map[index] != *mask_tile {
-                        let other_tiles: Vec<_> = wave.cells[index].iter().collect();
+                        let other_tiles: Vec<_> = wave.cells[index]
+                            .iter()
+                            .filter(|x| *x != mapping[&template_map[index]] as usize)
+                            .collect();
                         for tile in other_tiles {
                             wave.cells[index].deactivate(tile as usize);
                         }
@@ -639,7 +642,7 @@ impl Wave2 {
 
                 failures_at_current_max_depth += 1;
 
-                if failures_at_current_max_depth > 128 {
+                if failures_at_current_max_depth > 32 {
                     failures_at_current_max_depth = 0;
                     times_nuked_at_current_max_depth += 1;
 
