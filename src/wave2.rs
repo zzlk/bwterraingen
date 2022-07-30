@@ -23,8 +23,8 @@ fn calculate_support_internal(
     tiles: &BitSet<MAX_TILE_BITS>,
     ordinal: usize,
     rules: &FlatRules,
-) -> [usize; MAX_TILE_IDS] {
-    let mut support = [0; MAX_TILE_IDS];
+) -> Vec<usize> {
+    let mut support = vec![0; MAX_TILE_IDS];
 
     for src_tile in src_tiles {
         if let Some(rule) = &rules.ruleset[ordinal][src_tile as usize] {
@@ -34,6 +34,10 @@ fn calculate_support_internal(
                 }
             }
         }
+    }
+
+    while support.len() > 0 && *support.last().unwrap() == 0 {
+        support.truncate(support.len() - 1);
     }
 
     support
@@ -46,7 +50,7 @@ struct FlatRules {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Cell {
-    stuff: [[i16; 4]; MAX_TILE_IDS],
+    stuff: Vec<[i16; 4]>,
     active: BitSet<MAX_TILE_BITS>,
     cached_len: usize,
 }
@@ -54,7 +58,7 @@ struct Cell {
 impl Cell {
     fn new() -> Cell {
         Cell {
-            stuff: [[0i16; 4]; MAX_TILE_IDS],
+            stuff: Vec::new(),
             active: BitSet::new(),
             cached_len: 0,
         }
@@ -213,6 +217,7 @@ impl Wave2 {
         let mut example_cell = Cell::new();
 
         // Calculate the kind of 'all-tiles' cell
+        example_cell.stuff = vec![[0, 0, 0, 0]; inverse_mapping.len()];
         for tile in inverse_mapping.keys() {
             example_cell.set(*tile as usize, [0, 0, 0, 0]);
             example_cell.activate(*tile as usize);
