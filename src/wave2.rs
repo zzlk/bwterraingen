@@ -566,7 +566,7 @@ impl Wave2 {
         entropies.shuffle(&mut rng);
         entropies.sort_unstable_by_key(|x| (x.1 as isize));
 
-        entropies.truncate(cmp::max(2, at_least));
+        entropies.truncate(at_least);
 
         entropies.sort_unstable_by_key(|x| -(x.1 as isize));
 
@@ -614,10 +614,7 @@ impl Wave2 {
 
         let mut last_time = Instant::now();
 
-        let mut failures_at_current_max_depth = 0;
-        let mut depth = 0;
-        let mut max_depth = 0;
-        let mut times_nuked_at_current_max_depth = 0;
+        let mut failures = 0;
 
         current_indices = self.get_entropy_indices_in_order(&mut rng, 100000)?;
 
@@ -652,32 +649,18 @@ impl Wave2 {
 
             if contradiction {
                 self.propagate_add(&deactivated);
-                // current_wave.unpropagate_v2(&propagation_backup);
-                depth -= 1;
+                failures += 1;
 
-                // let failed_x = failed_at as isize % self.width;
-                // let failed_y = failed_at as isize / self.width;
+                // if failures > 256 {
+                //     error!("NUKE");
+                //     failures = 0;
 
-                // let failures_entry = failures.entry((failed_x, failed_y)).or_insert(0);
-
-                failures_at_current_max_depth += 1;
-
-                if failures_at_current_max_depth > 16 {
-                    failures_at_current_max_depth = 0;
-                    times_nuked_at_current_max_depth += 1;
-
-                    error!("NUKE");
-
-                    for _ in 0..std::cmp::min(
-                        times_nuked_at_current_max_depth * times_nuked_at_current_max_depth,
-                        deactivations.len(),
-                    ) {
-                        depth -= 1;
-                        let deactivated = deactivations.pop_front().unwrap();
-                        self.propagate_add(&deactivated);
-                        current_indices = indices.pop_front().unwrap();
-                    }
-                }
+                //     for _ in 0..std::cmp::min(256, deactivations.len()) {
+                //         let deactivated = deactivations.pop_front().unwrap();
+                //         self.propagate_add(&deactivated);
+                //         current_indices = indices.pop_front().unwrap();
+                //     }
+                // }
                 continue;
             }
 
@@ -685,16 +668,12 @@ impl Wave2 {
                 return anyhow::Ok(());
             }
 
-            depth += 1;
-            if depth > max_depth {
-                failures_at_current_max_depth = 0;
-                times_nuked_at_current_max_depth = 0;
-                max_depth = depth;
-            }
-
             deactivations.push_front(deactivated);
             indices.push_front(current_indices);
-            current_indices = self.get_entropy_indices_in_order(&mut rng, 2)?;
+            current_indices = self.get_entropy_indices_in_order(
+                &mut rng,
+                if deactivations.len() % 19 == 0 { 2 } else { 1 },
+            )?;
 
             deactivations.shrink_to_fit();
             indices.shrink_to_fit();
