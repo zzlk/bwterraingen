@@ -1,45 +1,16 @@
 use crate::rules::Rules;
-use anyhow::anyhow;
 use anyhow::Result;
+use bwmap::ParsedChk;
 use hashbrown::HashSet;
 
 pub fn get_rules_from_chk(chk: &[u8]) -> Result<Rules> {
-    let raw_chunks = bwmap::parse_chk(chk);
-    let merged_chunks = bwmap::merge_raw_chunks(raw_chunks.as_slice());
-    let parsed_chunks = bwmap::parse_merged_chunks(&merged_chunks)?;
+    let parsed_chk = ParsedChk::from_bytes(chk);
 
-    let dim = {
-        if let bwmap::ParsedChunk::DIM(r) = parsed_chunks
-            .get(&bwmap::ChunkName::DIM)
-            .ok_or(anyhow!("could't get dim section"))?
-        {
-            r
-        } else {
-            anyhow::bail!("couldn't do something with dim...")
-        }
-    };
+    let dim = parsed_chk.dim?;
 
-    let mtxm = {
-        if let bwmap::ParsedChunk::MTXM(r) = parsed_chunks
-            .get(&bwmap::ChunkName::MTXM)
-            .ok_or(anyhow!("could't get mtxm section"))?
-        {
-            r
-        } else {
-            anyhow::bail!("couldn't do something with mtxm...")
-        }
-    };
+    let mtxm = parsed_chk.mtxm?;
 
-    let era = {
-        if let bwmap::ParsedChunk::ERA(r) = parsed_chunks
-            .get(&bwmap::ChunkName::ERA)
-            .ok_or(anyhow!("could't get era section"))?
-        {
-            r
-        } else {
-            anyhow::bail!("couldn't do something with era...")
-        }
-    };
+    let era = parsed_chk.era?;
 
     let mut banned_tiles = HashSet::new();
     for i in 0..16 {
@@ -56,20 +27,9 @@ pub fn get_rules_from_chk(chk: &[u8]) -> Result<Rules> {
 }
 
 pub fn get_list_of_unique_tiles_from_chk(chk: &[u8]) -> Result<HashSet<u16>> {
-    let raw_chunks = bwmap::parse_chk(chk);
-    let merged_chunks = bwmap::merge_raw_chunks(raw_chunks.as_slice());
-    let parsed_chunks = bwmap::parse_merged_chunks(&merged_chunks)?;
+    let parsed_chk = ParsedChk::from_bytes(chk);
 
-    let mtxm = {
-        if let bwmap::ParsedChunk::MTXM(r) = parsed_chunks
-            .get(&bwmap::ChunkName::MTXM)
-            .ok_or(anyhow!("could't get mtxm section"))?
-        {
-            r
-        } else {
-            anyhow::bail!("couldn't do something with mtxm...")
-        }
-    };
+    let mtxm = parsed_chk.mtxm?;
 
     let mut set = HashSet::new();
 
@@ -81,31 +41,10 @@ pub fn get_list_of_unique_tiles_from_chk(chk: &[u8]) -> Result<HashSet<u16>> {
 }
 
 pub fn get_dim_from_chk(chk: &[u8]) -> Result<(u16, u16, Vec<u16>)> {
-    let raw_chunks = bwmap::parse_chk(chk);
-    let merged_chunks = bwmap::merge_raw_chunks(raw_chunks.as_slice());
-    let parsed_chunks = bwmap::parse_merged_chunks(&merged_chunks)?;
+    let parsed_chk = ParsedChk::from_bytes(chk);
 
-    let dim = {
-        if let bwmap::ParsedChunk::DIM(r) = parsed_chunks
-            .get(&bwmap::ChunkName::DIM)
-            .ok_or(anyhow!("could't get dim section"))?
-        {
-            r
-        } else {
-            anyhow::bail!("couldn't do something with dim...")
-        }
-    };
-
-    let mtxm = {
-        if let bwmap::ParsedChunk::MTXM(r) = parsed_chunks
-            .get(&bwmap::ChunkName::MTXM)
-            .ok_or(anyhow!("could't get mtxm section"))?
-        {
-            r
-        } else {
-            anyhow::bail!("couldn't do something with mtxm...")
-        }
-    };
+    let dim = parsed_chk.dim?;
+    let mtxm = parsed_chk.mtxm?;
 
     anyhow::Ok((*dim.width, *dim.height, mtxm.data.clone()))
 }
