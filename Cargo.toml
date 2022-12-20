@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bwmap = { git = "ssh://git@github.com/zzlk/bwmap.git", default-features = false }
+bwmap = { git = "https://github.com/zzlk/bwmap", default-features = false }
 
 #image = { version = "*", features = ["png", "webp"] }
 rand = { version = "*" }
