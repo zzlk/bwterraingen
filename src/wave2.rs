@@ -8,7 +8,7 @@ use instant::Instant;
 use rand::distributions::Uniform;
 use rand::prelude::ThreadRng;
 use rand::prelude::{Distribution, SliceRandom};
-use std::cmp::{self, Ordering};
+use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use tracing::{debug, error, info, instrument};
@@ -614,8 +614,6 @@ impl Wave2 {
 
         let mut last_time = Instant::now();
 
-        let mut failures = 0;
-
         current_indices = self.get_entropy_indices_in_order(&mut rng, 100000)?;
 
         debug!("start main loop");
@@ -649,7 +647,6 @@ impl Wave2 {
 
             if contradiction {
                 self.propagate_add(&deactivated);
-                failures += 1;
 
                 // if failures > 256 {
                 //     error!("NUKE");
