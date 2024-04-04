@@ -27,7 +27,7 @@ fn calculate_support_internal(
     let mut support = vec![0; MAX_TILE_IDS];
 
     for src_tile in src_tiles {
-        if let Some(rule) = &rules.ruleset[ordinal][src_tile as usize] {
+        if let Some(rule) = &rules.ruleset[ordinal][src_tile] {
             for allowed_tile in rule {
                 if tiles.get(*allowed_tile as usize) {
                     support[*allowed_tile as usize] += 1;
@@ -243,7 +243,7 @@ impl Wave2 {
                             .filter(|x| *x != mapping[&template_map[index]] as usize)
                             .collect();
                         for tile in other_tiles {
-                            wave.cells[index].deactivate(tile as usize);
+                            wave.cells[index].deactivate(tile);
                         }
                     }
                 }
@@ -358,7 +358,7 @@ impl Wave2 {
         let target_index = (target_x + target_y * self.width) as usize;
 
         for tile in tiles {
-            self.cells[target_index].set(tile as usize, [0, 0, 0, 0]);
+            self.cells[target_index].set(tile, [0, 0, 0, 0]);
         }
 
         for (ordinal, direction) in DIRECTIONS.iter().enumerate() {
@@ -840,7 +840,7 @@ mod test {
         );
 
         #[rustfmt::skip]
-        let wave = Wave2::new(2 as isize, 2 as isize, &rules, Some((vec![
+        let wave = Wave2::new(2, 2, &rules, Some((vec![
             4, 1,
             2, 3], 4)));
 

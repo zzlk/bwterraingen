@@ -60,7 +60,7 @@ pub fn create_chk_from_wave(map: &Vec<u16>, era: u16, width: usize, height: usiz
 
     bytes.extend_from_slice(b"ERA ");
     bytes.extend_from_slice(2u32.to_le_bytes().as_slice());
-    bytes.extend_from_slice((era as u16).to_le_bytes().as_slice());
+    bytes.extend_from_slice(era.to_le_bytes().as_slice());
 
     bytes.extend_from_slice(b"DIM ");
     bytes.extend_from_slice(4u32.to_le_bytes().as_slice());
@@ -70,13 +70,13 @@ pub fn create_chk_from_wave(map: &Vec<u16>, era: u16, width: usize, height: usiz
     bytes.extend_from_slice(b"MTXM");
     bytes.extend_from_slice(((map.len() * 2) as u32).to_le_bytes().as_slice());
     for word in map.iter() {
-        bytes.extend_from_slice((*word as u16).to_le_bytes().as_slice());
+        bytes.extend_from_slice((*word).to_le_bytes().as_slice());
     }
 
     bytes.extend_from_slice(b"TILE");
     bytes.extend_from_slice(((map.len() * 2) as u32).to_le_bytes().as_slice());
     for word in map.iter() {
-        bytes.extend_from_slice((*word as u16).to_le_bytes().as_slice());
+        bytes.extend_from_slice((*word).to_le_bytes().as_slice());
     }
 
     bytes

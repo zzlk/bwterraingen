@@ -11,18 +11,18 @@ impl<const N: usize> BitSet<N> {
     }
 
     pub fn get(&self, offset: usize) -> bool {
-        (self.bits[offset / BITS_PER_WORD] & 1 << offset % BITS_PER_WORD) != 0
+        (self.bits[offset / BITS_PER_WORD] & 1 << (offset % BITS_PER_WORD)) != 0
     }
 
     pub fn insert(&mut self, offset: usize) -> bool {
         let ret = self.get(offset);
-        self.bits[offset / BITS_PER_WORD] |= 1 << offset % BITS_PER_WORD;
+        self.bits[offset / BITS_PER_WORD] |= 1 << (offset % BITS_PER_WORD);
         !ret
     }
 
     pub fn remove(&mut self, offset: usize) -> bool {
         let ret = self.get(offset);
-        self.bits[offset / BITS_PER_WORD] &= !(1 << offset % BITS_PER_WORD);
+        self.bits[offset / BITS_PER_WORD] &= !(1 << (offset % BITS_PER_WORD));
         ret
     }
 
