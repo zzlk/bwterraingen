@@ -186,15 +186,15 @@ mod test {
         let mut bts = BTreeSet::new();
 
         for v in &a {
-            assert_eq!(bs.get(v.0), bts.get(&v.0).is_some());
+            assert_eq!(bs.get(v.0), bts.contains(&v.0));
             assert_eq!(bs.insert(v.0), bts.insert(v.0));
-            assert_eq!(bs.get(v.0), bts.get(&v.0).is_some());
+            assert_eq!(bs.get(v.0), bts.contains(&v.0));
         }
 
         for v in &b {
-            assert_eq!(bs.get(v.0), bts.get(&v.0).is_some());
+            assert_eq!(bs.get(v.0), bts.contains(&v.0));
             assert_eq!(bs.remove(v.0), bts.remove(&v.0));
-            assert_eq!(bs.get(v.0), bts.get(&v.0).is_some());
+            assert_eq!(bs.get(v.0), bts.contains(&v.0));
         }
 
         assert_eq!(bs.len(), bts.len());
