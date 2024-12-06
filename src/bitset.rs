@@ -107,7 +107,7 @@ impl<'a, const N: usize> IntoIterator for &'a BitSet<N> {
     }
 }
 
-impl<'a, const N: usize> Iterator for BitSetIterator<'a, N> {
+impl<const N: usize> Iterator for BitSetIterator<'_, N> {
     type Item = usize;
     fn next(&mut self) -> Option<Self::Item> {
         loop {
